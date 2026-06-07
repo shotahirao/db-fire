@@ -132,7 +132,11 @@ fn sql_to_json(row: &PgRow, index: usize) -> Result<serde_json::Value, sqlx::Err
 
     let type_info = row.column(index).type_info().name();
     match type_info {
-        "INT2" | "INT4" | "INT8" => {
+        "INT2" | "INT4" => {
+            let v: Option<i32> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |n| JsonValue::Number(n.into())))
+        }
+        "INT8" => {
             let v: Option<i64> = row.try_get(index)?;
             Ok(v.map_or(JsonValue::Null, |n| JsonValue::Number(n.into())))
         }
@@ -148,8 +152,12 @@ fn sql_to_json(row: &PgRow, index: usize) -> Result<serde_json::Value, sqlx::Err
             let v: Option<serde_json::Value> = row.try_get(index)?;
             Ok(v.unwrap_or(JsonValue::Null))
         }
-        "TIMESTAMP" | "TIMESTAMPTZ" => {
+        "TIMESTAMP" => {
             let v: Option<chrono::NaiveDateTime> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |dt| JsonValue::String(dt.to_string())))
+        }
+        "TIMESTAMPTZ" => {
+            let v: Option<chrono::DateTime<chrono::Utc>> = row.try_get(index)?;
             Ok(v.map_or(JsonValue::Null, |dt| JsonValue::String(dt.to_string())))
         }
         "DATE" => {

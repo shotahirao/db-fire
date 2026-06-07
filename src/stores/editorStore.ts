@@ -10,6 +10,9 @@ interface EditorTab {
     affectedRows?: number;
   } | null;
   isExecuting: boolean;
+  lastQuery?: string;
+  lastExecutionTime?: number;
+  lastAffectedRows?: number;
 }
 
 interface EditorState {
@@ -23,6 +26,7 @@ interface EditorState {
   updateTabContent: (id: string, content: string) => void;
   setTabResults: (id: string, results: EditorTab['results']) => void;
   setTabExecuting: (id: string, isExecuting: boolean) => void;
+  setTabQueryMeta: (id: string, meta: { lastQuery: string; lastExecutionTime: number; lastAffectedRows?: number }) => void;
   addToHistory: (query: string) => void;
 }
 
@@ -76,6 +80,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTabExecuting: (id, isExecuting) => {
     set({
       tabs: get().tabs.map((t) => (t.id === id ? { ...t, isExecuting } : t)),
+    });
+  },
+
+  setTabQueryMeta: (id, meta) => {
+    set({
+      tabs: get().tabs.map((t) => (t.id === id ? { ...t, ...meta } : t)),
     });
   },
 

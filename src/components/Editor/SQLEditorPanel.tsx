@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
 import { useEditorStore } from '../../stores/editorStore';
 import { MonacoEditor } from './MonacoEditor';
 import { DataGrid } from '../DataGrid/DataGrid';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Plus, X, Loader2, ArrowLeft } from 'lucide-react';
+import { Play, Plus, X, Loader2, ArrowLeft, Database, Terminal } from 'lucide-react';
 
 interface SQLEditorPanelProps {
   onClose?: () => void;
@@ -21,10 +21,12 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
     updateTabContent,
     setTabResults,
     setTabExecuting,
+    setTabQueryMeta,
     addToHistory,
   } = useEditorStore();
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
+  const [resultPaneTab, setResultPaneTab] = useState<'results' | 'query'>('results');
 
   const schemaTables = React.useMemo(() => {
     const schema: { name: string; columns: string[] }[] = [];
@@ -53,6 +55,8 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
 
     setTabExecuting(activeTab.id, true);
     setTabResults(activeTab.id, null);
+    setResultPaneTab('results');
+    const startTime = Date.now();
 
     try {
       const result = await invoke<{
@@ -63,6 +67,9 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
         id: activeConnectionId,
         sql,
       });
+
+      const elapsed = Date.now() - startTime;
+      const affectedRows = result.affected_rows;
 
       if (result.columns.length > 0) {
         setTabResults(activeTab.id, {
@@ -79,17 +86,27 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
       } else {
         setTabResults(activeTab.id, {
           columns: ['Result'],
-          rows: [[`Affected rows: ${result.affected_rows || 0}`]],
-          affectedRows: result.affected_rows,
+          rows: [[`Affected rows: ${affectedRows || 0}`]],
+          affectedRows,
         });
       }
 
+      setTabQueryMeta(activeTab.id, {
+        lastQuery: sql,
+        lastExecutionTime: elapsed,
+        lastAffectedRows: affectedRows,
+      });
       addToHistory(sql);
     } catch (err) {
+      const elapsed = Date.now() - startTime;
       setTabResults(activeTab.id, {
         columns: ['Error'],
         rows: [[String(err)]],
         affectedRows: undefined,
+      });
+      setTabQueryMeta(activeTab.id, {
+        lastQuery: sql,
+        lastExecutionTime: elapsed,
       });
     } finally {
       setTabExecuting(activeTab.id, false);
@@ -182,21 +199,70 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
 
         {/* Results */}
         {activeTab?.results && (
-          <div className="flex-1 min-h-[150px] border-t border-[var(--color-border)] overflow-hidden">
-            {activeTab.results.columns[0] === 'Error' ? (
-              <div className="p-3 text-sm text-[var(--color-danger)] font-mono whitespace-pre-wrap overflow-auto h-full">
-                {String(activeTab.results.rows[0]?.[0] || 'Unknown error')}
-              </div>
-            ) : activeTab.results.columns[0] === 'Result' ? (
-              <div className="p-3 text-sm text-[var(--color-success)]">
-                {String(activeTab.results.rows[0]?.[0] || '')}
-              </div>
-            ) : (
-              <DataGrid
-                columns={activeTab.results.columns}
-                rows={activeTab.results.rows}
-              />
-            )}
+          <div className="flex-1 min-h-[150px] border-t border-[var(--color-border)] overflow-hidden flex flex-col">
+            {/* Result pane tabs */}
+            <div className="flex items-center border-b border-[var(--color-border)] bg-[var(--color-panel-bg)]">
+              <button
+                onClick={() => setResultPaneTab('results')}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs border-r border-[var(--color-border)] ${
+                  resultPaneTab === 'results'
+                    ? 'bg-[var(--color-main-bg)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                <Database size={12} />
+                Results
+              </button>
+              <button
+                onClick={() => setResultPaneTab('query')}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs border-r border-[var(--color-border)] ${
+                  resultPaneTab === 'query'
+                    ? 'bg-[var(--color-main-bg)] text-[var(--color-text)]'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                <Terminal size={12} />
+                Query
+              </button>
+            </div>
+
+            {/* Pane content */}
+            <div className="flex-1 overflow-hidden">
+              {resultPaneTab === 'results' ? (
+                activeTab.results.columns[0] === 'Error' ? (
+                  <div className="p-3 text-sm text-[var(--color-danger)] font-mono whitespace-pre-wrap overflow-auto h-full">
+                    {String(activeTab.results.rows[0]?.[0] || 'Unknown error')}
+                  </div>
+                ) : activeTab.results.columns[0] === 'Result' ? (
+                  <div className="p-3 text-sm text-[var(--color-success)]">
+                    {String(activeTab.results.rows[0]?.[0] || '')}
+                  </div>
+                ) : (
+                  <DataGrid
+                    columns={activeTab.results.columns}
+                    rows={activeTab.results.rows}
+                  />
+                )
+              ) : (
+                <div className="p-3 h-full overflow-auto">
+                  <div className="text-xs text-[var(--color-text-muted)] mb-2 flex items-center gap-4">
+                    <span>
+                      {activeTab.lastExecutionTime !== undefined && (
+                        <>Execution time: <strong className="text-[var(--color-text)]">{activeTab.lastExecutionTime} ms</strong></>
+                      )}
+                    </span>
+                    {activeTab.lastAffectedRows !== undefined && (
+                      <span>
+                        Affected rows: <strong className="text-[var(--color-text)]">{activeTab.lastAffectedRows}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <pre className="text-sm font-mono text-[var(--color-text)] whitespace-pre-wrap bg-[var(--color-panel-bg)] p-2 rounded border border-[var(--color-border)]">
+                    {activeTab.lastQuery || activeTab.content}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
