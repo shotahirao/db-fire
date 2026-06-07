@@ -21,6 +21,7 @@ pub fn run() {
             commands::list_connections,
             commands::delete_connection,
             commands::update_connection,
+            commands::test_connection,
             commands::connect_db,
             commands::disconnect_db,
             commands::list_databases,

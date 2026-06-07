@@ -10,6 +10,7 @@ interface ConnectionState {
   createConnection: (config: ConnectionConfig) => Promise<void>;
   updateConnection: (config: ConnectionConfig) => Promise<void>;
   deleteConnection: (id: string) => Promise<void>;
+  testConnection: (config: ConnectionConfig) => Promise<void>;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
@@ -55,5 +56,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } catch (err) {
       set({ error: String(err), isLoading: false });
     }
+  },
+
+  testConnection: async (config) => {
+    await invoke('test_connection', { config });
   },
 }));

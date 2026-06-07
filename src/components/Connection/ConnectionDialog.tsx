@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X, FileKey } from 'lucide-react';
+import { X, FileKey, Plug, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { ConnectionConfig } from '../../types/connection';
 import { useConnectionStore } from '../../stores/connectionStore';
@@ -31,7 +31,9 @@ const emptyConnection = (): ConnectionConfig => ({
 
 export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpenChange, connection }) => {
   const [form, setForm] = useState<ConnectionConfig>(emptyConnection());
-  const { createConnection, updateConnection } = useConnectionStore();
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testMessage, setTestMessage] = useState('');
+  const { createConnection, updateConnection, testConnection } = useConnectionStore();
 
   useEffect(() => {
     if (connection) {
@@ -39,6 +41,8 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
     } else {
       setForm(emptyConnection());
     }
+    setTestStatus('idle');
+    setTestMessage('');
   }, [connection, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,6 +56,19 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
   };
 
   const isSqlite = form.type === 'sqlite';
+
+  const handleTest = async () => {
+    setTestStatus('testing');
+    setTestMessage('');
+    try {
+      await testConnection(form);
+      setTestStatus('success');
+      setTestMessage('Connection successful!');
+    } catch (err) {
+      setTestStatus('error');
+      setTestMessage(String(err));
+    }
+  };
 
   const handlePickPrivateKey = async () => {
     const path = await openDialog({
@@ -248,18 +265,38 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
               </div>
             )}
 
-            <div className="pt-4 flex justify-end gap-2">
-              <Dialog.Close asChild>
-                <button type="button" className="px-4 py-2 rounded text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-main-bg)]">
-                  Cancel
-                </button>
-              </Dialog.Close>
+            {testStatus !== 'idle' && (
+              <div className={`flex items-center gap-2 text-xs ${testStatus === 'success' ? 'text-green-400' : testStatus === 'error' ? 'text-red-400' : 'text-[var(--color-text-muted)]'}`}>
+                {testStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
+                {testStatus === 'success' && <CheckCircle size={14} />}
+                {testStatus === 'error' && <XCircle size={14} />}
+                <span>{testMessage || 'Testing connection...'}</span>
+              </div>
+            )}
+
+            <div className="pt-2 flex justify-between gap-2">
               <button
-                type="submit"
-                className="px-4 py-2 rounded text-sm bg-[var(--color-accent)] text-[var(--color-main-bg)] font-medium hover:bg-[var(--color-accent-hover)]"
+                type="button"
+                onClick={handleTest}
+                disabled={testStatus === 'testing'}
+                className="px-4 py-2 rounded text-sm border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-main-bg)] disabled:opacity-50 flex items-center gap-1.5"
               >
-                {connection ? 'Save' : 'Create'}
+                <Plug size={14} />
+                Test Connection
               </button>
+              <div className="flex gap-2">
+                <Dialog.Close asChild>
+                  <button type="button" className="px-4 py-2 rounded text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-main-bg)]">
+                    Cancel
+                  </button>
+                </Dialog.Close>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded text-sm bg-[var(--color-accent)] text-[var(--color-main-bg)] font-medium hover:bg-[var(--color-accent-hover)]"
+                >
+                  {connection ? 'Save' : 'Create'}
+                </button>
+              </div>
             </div>
           </form>
         </Dialog.Content>

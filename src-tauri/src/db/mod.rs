@@ -28,15 +28,10 @@ impl ConnectionManager {
         }
     }
 
-    pub async fn connect(&self, config: &ConnectionConfig) -> Result<(), String> {
-        let mut pools = self.pools.lock().await;
-        if pools.contains_key(&config.id) {
-            return Ok(());
-        }
-
+    async fn build_effective_config(&self, config: &ConnectionConfig) -> Result<(ConnectionConfig, Option<SshTunnel>), String> {
         let mut effective_config = config.clone();
+        let mut tunnel = None;
 
-        // Setup SSH tunnel if enabled
         if config.ssh_enabled.unwrap_or(false) {
             let ssh_host = config.ssh_host.as_deref().ok_or("SSH host not configured")?;
             let ssh_port = config.ssh_port.unwrap_or(22);
@@ -45,7 +40,7 @@ impl ConnectionManager {
             let db_host = config.host.as_deref().unwrap_or("localhost");
             let db_port = config.port.unwrap_or(3306);
 
-            let tunnel = SshTunnel::connect(
+            let t = SshTunnel::connect(
                 ssh_host,
                 ssh_port,
                 ssh_user,
@@ -55,12 +50,68 @@ impl ConnectionManager {
             )
             .await?;
 
-            let local_port = tunnel.local_port();
+            let local_port = t.local_port();
             effective_config.host = Some("127.0.0.1".to_string());
             effective_config.port = Some(local_port);
+            tunnel = Some(t);
+        }
 
+        Ok((effective_config, tunnel))
+    }
+
+    pub async fn test_connection(&self, config: &ConnectionConfig) -> Result<(), String> {
+        let (effective_config, _tunnel) = self.build_effective_config(config).await?;
+
+        let pool = match config.conn_type.as_str() {
+            "mysql" => {
+                let pool = mysql::connect(&effective_config).await?;
+                DbPool::MySql(pool)
+            }
+            "postgres" => {
+                let pool = postgres::connect(&effective_config).await?;
+                DbPool::Postgres(pool)
+            }
+            "sqlite" => {
+                let pool = sqlite::connect(&effective_config).await?;
+                DbPool::Sqlite(pool)
+            }
+            _ => return Err(format!("Unsupported database type: {}", config.conn_type)),
+        };
+
+        // Test the connection with a simple query
+        match &pool {
+            DbPool::MySql(p) => {
+                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
+            }
+            DbPool::Postgres(p) => {
+                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
+            }
+            DbPool::Sqlite(p) => {
+                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
+            }
+        }
+
+        // Close the pool immediately after test
+        match pool {
+            DbPool::MySql(p) => p.close().await,
+            DbPool::Postgres(p) => p.close().await,
+            DbPool::Sqlite(p) => p.close().await,
+        }
+
+        Ok(())
+    }
+
+    pub async fn connect(&self, config: &ConnectionConfig) -> Result<(), String> {
+        let mut pools = self.pools.lock().await;
+        if pools.contains_key(&config.id) {
+            return Ok(());
+        }
+
+        let (effective_config, tunnel) = self.build_effective_config(config).await?;
+
+        if let Some(t) = tunnel {
             let mut tunnels = self.ssh_tunnels.lock().await;
-            tunnels.insert(config.id.clone(), tunnel);
+            tunnels.insert(config.id.clone(), t);
         }
 
         let pool = match config.conn_type.as_str() {

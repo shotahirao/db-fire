@@ -53,6 +53,15 @@ pub async fn update_connection(
 }
 
 #[tauri::command]
+pub async fn test_connection(
+    app: AppHandle,
+    config: ConnectionConfig,
+) -> Result<(), String> {
+    let manager = app.state::<ConnectionManager>();
+    manager.test_connection(&config).await
+}
+
+#[tauri::command]
 pub async fn connect_db(
     app: AppHandle,
     id: String,
