@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
+import { X, FileKey } from 'lucide-react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { ConnectionConfig } from '../../types/connection';
 import { useConnectionStore } from '../../stores/connectionStore';
 
@@ -51,6 +52,16 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
   };
 
   const isSqlite = form.type === 'sqlite';
+
+  const handlePickPrivateKey = async () => {
+    const path = await openDialog({
+      multiple: false,
+      directory: false,
+    });
+    if (typeof path === 'string') {
+      setForm({ ...form, sshPrivateKey: path });
+    }
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -162,6 +173,78 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
                   onChange={(e) => setForm({ ...form, filePath: e.target.value })}
                   className="w-full px-3 py-2 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-sm focus:outline-none focus:border-[var(--color-accent)]"
                 />
+              </div>
+            )}
+
+            {!isSqlite && (
+              <div className="space-y-3 pt-2 border-t border-[var(--color-border)]">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="sshEnabled"
+                    checked={form.sshEnabled || false}
+                    onChange={(e) => setForm({ ...form, sshEnabled: e.target.checked })}
+                    className="rounded border-[var(--color-border)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                  <label htmlFor="sshEnabled" className="text-sm font-medium text-[var(--color-text-muted)]">
+                    Use SSH Tunnel
+                  </label>
+                </div>
+
+                {form.sshEnabled && (
+                  <div className="space-y-3 pl-1">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">SSH Host</label>
+                        <input
+                          type="text"
+                          value={form.sshHost || ''}
+                          onChange={(e) => setForm({ ...form, sshHost: e.target.value })}
+                          className="w-full px-3 py-2 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-sm focus:outline-none focus:border-[var(--color-accent)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">SSH Port</label>
+                        <input
+                          type="number"
+                          value={form.sshPort || 22}
+                          onChange={(e) => setForm({ ...form, sshPort: Number(e.target.value) })}
+                          className="w-full px-3 py-2 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-sm focus:outline-none focus:border-[var(--color-accent)]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">SSH User</label>
+                      <input
+                        type="text"
+                        value={form.sshUser || ''}
+                        onChange={(e) => setForm({ ...form, sshUser: e.target.value })}
+                        className="w-full px-3 py-2 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-sm focus:outline-none focus:border-[var(--color-accent)]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-[var(--color-text-muted)] mb-1">Private Key</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={form.sshPrivateKey || ''}
+                          placeholder="Select private key file..."
+                          className="flex-1 px-3 py-2 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-sm text-[var(--color-text-muted)] focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={handlePickPrivateKey}
+                          className="px-3 py-2 rounded text-sm bg-[var(--color-main-bg)] border border-[var(--color-border)] hover:bg-[var(--color-border)] text-[var(--color-text-muted)]"
+                        >
+                          <FileKey size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
