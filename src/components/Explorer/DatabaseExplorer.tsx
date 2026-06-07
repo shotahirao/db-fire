@@ -1,5 +1,5 @@
-import React from 'react';
-import { ChevronRight, ChevronDown, Table2, Database } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ChevronRight, ChevronDown, Table2, Database, Search } from 'lucide-react';
 import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
 
 export const DatabaseExplorer: React.FC = () => {
@@ -14,6 +14,13 @@ export const DatabaseExplorer: React.FC = () => {
   } = useActiveConnectionStore();
 
   const [expandedDbs, setExpandedDbs] = React.useState<Set<string>>(new Set());
+  const [tableSearch, setTableSearch] = useState('');
+
+  const filteredTables = useMemo(() => {
+    if (!tableSearch.trim()) return tables;
+    const term = tableSearch.toLowerCase();
+    return tables.filter((t) => t.name.toLowerCase().includes(term));
+  }, [tables, tableSearch]);
 
   const toggleDb = (db: string) => {
     setExpandedDbs((prev) => {
@@ -41,6 +48,27 @@ export const DatabaseExplorer: React.FC = () => {
           </p>
         )}
       </div>
+
+      {/* Table search */}
+      {activeDatabase && (
+        <div className="px-3 py-2 border-b border-[var(--color-border)]">
+          <div className="flex items-center gap-1.5 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded px-2 py-1 focus-within:border-[var(--color-accent)]">
+            <Search size={12} className="text-[var(--color-text-muted)] shrink-0" />
+            <input
+              type="text"
+              value={tableSearch}
+              onChange={(e) => setTableSearch(e.target.value)}
+              placeholder="Filter tables..."
+              className="bg-transparent text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none w-full"
+            />
+          </div>
+          {tableSearch && (
+            <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
+              {filteredTables.length} of {tables.length} tables
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && (
@@ -78,12 +106,12 @@ export const DatabaseExplorer: React.FC = () => {
 
             {expandedDbs.has(db) && (
               <div className="ml-5 space-y-0.5 mt-0.5">
-                {tables.length === 0 && (
+                {filteredTables.length === 0 && (
                   <div className="px-2 py-1 text-xs text-[var(--color-text-muted)]">
-                    No tables
+                    {tableSearch ? 'No matching tables' : 'No tables'}
                   </div>
                 )}
-                {tables.map((table) => (
+                {filteredTables.map((table) => (
                   <button
                     key={table.name}
                     onClick={() => {
