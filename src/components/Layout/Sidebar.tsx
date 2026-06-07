@@ -51,6 +51,11 @@ export const Sidebar: React.FC = () => {
           {connections.map((conn) => (
             <div
               key={conn.id}
+              onClick={() => {
+                if (activeConnectionId !== conn.id) {
+                  connect(conn.id);
+                }
+              }}
               className={`group flex items-center justify-between p-2 rounded cursor-pointer ${
                 activeConnectionId === conn.id
                   ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
