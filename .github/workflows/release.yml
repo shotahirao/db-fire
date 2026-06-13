@@ -28,6 +28,21 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Verify signing key hash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/secret-key
+          ACTUAL_HASH=$(shasum -a 256 /tmp/secret-key | awk '{print $1}')
+          EXPECTED_HASH="1d972387bc23ace93944055f5875181ff12f0b9993e6f216b27c87866e1585fb"
+          echo "Actual hash: $ACTUAL_HASH"
+          echo "Expected hash: $EXPECTED_HASH"
+          if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+            echo "ERROR: TAURI_SIGNING_PRIVATE_KEY does not match the expected key"
+            exit 1
+          fi
+          echo "TAURI_SIGNING_PRIVATE_KEY hash matches"
+
       - name: Install frontend dependencies
         run: npm install
 

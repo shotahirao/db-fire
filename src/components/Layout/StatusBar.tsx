@@ -8,7 +8,7 @@ export const StatusBar: React.FC = () => {
   return (
     <>
       <div className="h-7 px-3 flex items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-panel-bg)] text-xs text-[var(--color-text-muted)]">
-        <span>db-fire v0.1.4</span>
+        <span>db-fire v0.1.5</span>
         <button
           onClick={() => setSettingsOpen(true)}
           className="p-1 rounded hover:bg-[var(--color-main-bg)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
