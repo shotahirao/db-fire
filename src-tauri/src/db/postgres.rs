@@ -130,8 +130,8 @@ pub async fn execute_query(pool: &PgPool, sql: &str) -> Result<QueryResult, Stri
 fn sql_to_json(row: &PgRow, index: usize) -> Result<serde_json::Value, sqlx::Error> {
     use serde_json::Value as JsonValue;
 
-    let type_info = row.column(index).type_info().name();
-    match type_info {
+    let type_info = row.column(index).type_info().name().to_ascii_uppercase();
+    match type_info.as_str() {
         "INT2" | "INT4" => {
             let v: Option<i32> = row.try_get(index)?;
             Ok(v.map_or(JsonValue::Null, |n| JsonValue::Number(n.into())))
@@ -168,7 +168,80 @@ fn sql_to_json(row: &PgRow, index: usize) -> Result<serde_json::Value, sqlx::Err
             let v: Option<chrono::NaiveTime> = row.try_get(index)?;
             Ok(v.map_or(JsonValue::Null, |t| JsonValue::String(t.to_string())))
         }
+        "_INT2" | "_INT4" | "INT2[]" | "INT4[]" => {
+            let v: Option<Vec<i32>> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |arr| {
+                JsonValue::Array(arr.into_iter().map(|n| JsonValue::Number(n.into())).collect())
+            }))
+        }
+        "_INT8" | "INT8[]" => {
+            let v: Option<Vec<i64>> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |arr| {
+                JsonValue::Array(arr.into_iter().map(|n| JsonValue::Number(n.into())).collect())
+            }))
+        }
+        "_FLOAT4" | "_FLOAT8" | "FLOAT4[]" | "FLOAT8[]" => {
+            let v: Option<Vec<f64>> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |arr| {
+                JsonValue::Array(
+                    arr.into_iter()
+                        .map(|n| {
+                            JsonValue::Number(
+                                serde_json::Number::from_f64(n).unwrap_or(0.into()),
+                            )
+                        })
+                        .collect(),
+                )
+            }))
+        }
+        "_BOOL" | "BOOL[]" => {
+            let v: Option<Vec<bool>> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |arr| {
+                JsonValue::Array(arr.into_iter().map(JsonValue::Bool).collect())
+            }))
+        }
+        "_TEXT" | "_VARCHAR" | "_BPCHAR" | "_CHAR" | "TEXT[]" | "VARCHAR[]" | "BPCHAR[]" | "CHAR[]" => {
+            let v: Option<Vec<String>> = row.try_get(index)?;
+            Ok(v.map_or(JsonValue::Null, |arr| {
+                JsonValue::Array(arr.into_iter().map(JsonValue::String).collect())
+            }))
+        }
         _ => {
+            // Try common array types before falling back to string.
+            // This handles arrays regardless of how SQLx reports the type name.
+            if let Ok(v) = row.try_get::<Option<Vec<i32>>, _>(index) {
+                return Ok(v.map_or(JsonValue::Null, |arr| {
+                    JsonValue::Array(arr.into_iter().map(|n| JsonValue::Number(n.into())).collect())
+                }));
+            }
+            if let Ok(v) = row.try_get::<Option<Vec<i64>>, _>(index) {
+                return Ok(v.map_or(JsonValue::Null, |arr| {
+                    JsonValue::Array(arr.into_iter().map(|n| JsonValue::Number(n.into())).collect())
+                }));
+            }
+            if let Ok(v) = row.try_get::<Option<Vec<f64>>, _>(index) {
+                return Ok(v.map_or(JsonValue::Null, |arr| {
+                    JsonValue::Array(
+                        arr.into_iter()
+                            .map(|n| {
+                                JsonValue::Number(
+                                    serde_json::Number::from_f64(n).unwrap_or(0.into()),
+                                )
+                            })
+                            .collect(),
+                    )
+                }));
+            }
+            if let Ok(v) = row.try_get::<Option<Vec<bool>>, _>(index) {
+                return Ok(v.map_or(JsonValue::Null, |arr| {
+                    JsonValue::Array(arr.into_iter().map(JsonValue::Bool).collect())
+                }));
+            }
+            if let Ok(v) = row.try_get::<Option<Vec<String>>, _>(index) {
+                return Ok(v.map_or(JsonValue::Null, |arr| {
+                    JsonValue::Array(arr.into_iter().map(JsonValue::String).collect())
+                }));
+            }
             let v: Option<String> = row.try_get(index)?;
             Ok(v.map_or(JsonValue::Null, JsonValue::String))
         }
