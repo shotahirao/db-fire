@@ -46,3 +46,6 @@ lerna-debug.log*
 /src-tauri/gen
 *.app
 *.dmg
+
+# Python virtual environment
+.venv
