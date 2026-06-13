@@ -117,6 +117,31 @@ To distribute a properly signed app, configure the following GitHub Secrets (sam
 
 db-fire checks for updates on startup and downloads them automatically. Users can disable this in the app's Settings.
 
+## Download Release Version
+
+Download the latest release from GitHub Releases:
+
+```
+https://github.com/shotahirao/db-fire/releases/latest
+```
+
+### Troubleshooting on macOS
+
+db-fire is currently not signed with an Apple Developer ID, so macOS Gatekeeper may block the app with the following message:
+
+> “db-fire” is damaged and can’t be opened. You should move it to the Trash.
+
+If you see this message, remove the quarantine attribute using the Terminal:
+
+```bash
+xattr -d com.apple.quarantine /Applications/db-fire.app
+```
+
+Alternatively, you can also open the app by:
+
+- Right-clicking the app and selecting **Open**
+- Going to **System Settings → Privacy & Security** and clicking **Open Anyway** for db-fire
+
 ## License
 
 [MIT License](./LICENSE) © 2026 shotahirao
@@ -231,6 +256,31 @@ https://github.com/shotahirao/db-fire/releases
 ### 自動更新
 
 db-fire は起動時に更新を確認し、自動的にダウンロードします。アプリ内の設定から自動更新を OFF にすることもできます。
+
+## リリース版のダウンロード
+
+最新版は GitHub Releases からダウンロードできます。
+
+```
+https://github.com/shotahirao/db-fire/releases/latest
+```
+
+### macOS でアプリが開けない場合
+
+db-fire は現在 Apple Developer ID によるコード署名を行っていないため、macOS の Gatekeeper によって以下のようなメッセージが表示されることがあります。
+
+> 「db-fire」は壊れているため開けません。ゴミ箱に入れる必要があります。
+
+このメッセージが表示された場合は、ターミナルで以下のコマンドを実行し、アプリの検疫属性を解除してください。
+
+```bash
+xattr -d com.apple.quarantine /Applications/db-fire.app
+```
+
+または、以下の方法でも開けます。
+
+- アプリを右クリックして「開く」を選択
+- **システム設定 → プライバシーとセキュリティ** で db-fire の「**とにかく開く**」を許可
 
 ## ライセンス
 
