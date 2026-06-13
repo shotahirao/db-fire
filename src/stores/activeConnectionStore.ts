@@ -7,7 +7,7 @@ interface TableInfo {
   columns: ColumnInfo[];
 }
 
-interface ColumnInfo {
+export interface ColumnInfo {
   name: string;
   data_type: string;
   nullable: boolean;
@@ -40,11 +40,16 @@ interface ActiveConnectionState {
   selectDatabase: (database: string) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   fetchTableData: () => Promise<void>;
+  fetchAllTableData: (options?: { ignoreFilter?: boolean }) => Promise<{
+    columns: string[];
+    rows: (string | number | boolean | null)[][];
+  }>;
   setTableFilter: (filter: string) => void;
   setTableOffset: (offset: number) => void;
   setTableLimit: (limit: number) => void;
   fetchTableDdl: () => Promise<void>;
   executeUpdate: (sql: string) => Promise<number>;
+  importRows: (sqls: string[]) => Promise<void>;
 }
 
 export const useActiveConnectionStore = create<ActiveConnectionState>((set, get) => ({
@@ -192,6 +197,34 @@ export const useActiveConnectionStore = create<ActiveConnectionState>((set, get)
     }
   },
 
+  fetchAllTableData: async (options) => {
+    const { activeConnectionId, activeDatabase, selectedTable, tableFilter } = get();
+    if (!activeConnectionId || !activeDatabase || !selectedTable) {
+      throw new Error('No table selected');
+    }
+
+    let sql = `SELECT * FROM ${selectedTable}`;
+    if (!options?.ignoreFilter && tableFilter.trim()) {
+      sql += ` WHERE ${tableFilter}`;
+    }
+
+    const result = await invoke<{ columns: string[]; rows: any[][] }>('execute_query', {
+      id: activeConnectionId,
+      sql,
+    });
+
+    return {
+      columns: result.columns,
+      rows: result.rows.map((row) =>
+        row.map((cell) => {
+          if (cell === null || typeof cell === 'undefined') return null;
+          if (typeof cell === 'object') return JSON.stringify(cell);
+          return cell as string | number | boolean;
+        })
+      ),
+    };
+  },
+
   setTableFilter: (filter) => {
     set({ tableFilter: filter, tableOffset: 0 });
     get().fetchTableData();
@@ -228,5 +261,14 @@ export const useActiveConnectionStore = create<ActiveConnectionState>((set, get)
     const affected = await invoke<number>('execute_raw', { id: activeConnectionId, sql });
     await get().fetchTableData();
     return affected;
+  },
+
+  importRows: async (sqls) => {
+    const { activeConnectionId } = get();
+    if (!activeConnectionId) throw new Error('No active connection');
+    for (const sql of sqls) {
+      await invoke<number>('execute_raw', { id: activeConnectionId, sql });
+    }
+    await get().fetchTableData();
   },
 }));
