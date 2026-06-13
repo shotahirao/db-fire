@@ -5,9 +5,12 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 
 pub struct SshTunnel {
+    #[allow(dead_code)]
     session: Arc<Mutex<AsyncSession<TcpStream>>>,
     local_port: u16,
+    #[allow(dead_code)]
     remote_host: String,
+    #[allow(dead_code)]
     remote_port: u16,
 }
 
@@ -84,8 +87,8 @@ impl SshTunnel {
                 let remote_host = remote_host_clone.clone();
 
                 tokio::spawn(async move {
-                    let mut session = session.lock().await;
-                    let mut channel = match session
+                    let session = session.lock().await;
+                    let channel = match session
                         .channel_direct_tcpip(&remote_host, remote_port, None)
                         .await
                     {
