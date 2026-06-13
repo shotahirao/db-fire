@@ -29,7 +29,9 @@
 - **Powerful SQL editor** powered by Monaco Editor
 - **Table browser & data grid** for exploring schemas and query results
 - **Import & export** utilities for working with data
-- **Cross-platform desktop app** built with Tauri (macOS, Windows, Linux)
+- **Desktop app for macOS (Apple Silicon)** built with Tauri
+- **Automatic updates** via GitHub Releases
+- **Settings** to enable/disable automatic updates
 
 ## Tech Stack
 
@@ -69,7 +71,7 @@ This starts the Vite dev server and launches the Tauri desktop window.
 
 ## Build & Distribution
 
-### Build a release binary
+### Build a release binary locally
 
 ```bash
 npm run tauri build
@@ -81,11 +83,39 @@ After the build completes, distributable packages are generated under:
 src-tauri/target/release/bundle/
 ```
 
-Depending on your OS, you will find files such as:
+For macOS (Apple Silicon), you will find `.app` and `.dmg` files.
 
-- macOS: `.app`, `.dmg`
-- Windows: `.exe`, `.msi`
-- Linux: `.deb`, `.rpm`, `.AppImage`
+### Automated GitHub Releases
+
+Pushing a tag starting with `v` automatically builds and publishes a release:
+
+```bash
+git tag v0.1.8
+git push origin v0.1.8
+```
+
+The release will be published at:
+
+```
+https://github.com/shotahirao/db-fire/releases
+```
+
+### macOS Code Signing
+
+By default, releases are unsigned. On macOS, this causes a security warning when opening the app.
+
+To distribute a properly signed app, configure the following GitHub Secrets (same as [git-hydra](https://github.com/shotahirao/git-hydra)):
+
+- `CSC_LINK` - Base64-encoded Developer ID Application certificate (p12)
+- `CSC_KEY_PASSWORD` - Certificate password
+- `APPLE_ID` - Apple ID
+- `APPLE_APP_SPECIFIC_PASSWORD` - App-specific password
+- `APPLE_TEAM_ID` - Apple Developer Team ID
+- `APPLE_SIGNING_IDENTITY` - Signing identity (optional)
+
+### Automatic Updates
+
+db-fire checks for updates on startup and downloads them automatically. Users can disable this in the app's Settings.
 
 ## License
 
@@ -114,7 +144,9 @@ Depending on your OS, you will find files such as:
 - **Monaco Editor を搭載した SQL エディタ**
 - **テーブルブラウザ & データグリッド**によるスキーマ・結果の確認
 - **データのインポート / エクスポート**
-- **Tauri によるクロスプラットフォーム対応**（macOS、Windows、Linux）
+- **macOS（Apple Silicon）向けデスクトップアプリ**
+- **GitHub Releases による自動更新**
+- **自動更新の ON/OFF 設定**
 
 ## 技術スタック
 
@@ -154,7 +186,7 @@ Vite の開発サーバーが起動し、Tauri のデスクトップウィンド
 
 ## ビルドと配布
 
-### リリース用バイナリをビルド
+### ローカルでリリース用バイナリをビルド
 
 ```bash
 npm run tauri build
@@ -166,11 +198,39 @@ npm run tauri build
 src-tauri/target/release/bundle/
 ```
 
-OS によって、以下のようなファイルが生成されます。
+macOS（Apple Silicon）では `.app` と `.dmg` が生成されます。
 
-- macOS: `.app`、`.dmg`
-- Windows: `.exe`、`.msi`
-- Linux: `.deb`、`.rpm`、`.AppImage`
+### GitHub Releases による自動配布
+
+`v` から始まるタグをプッシュすると、自動的にビルド＆公開リリースが作成されます。
+
+```bash
+git tag v0.1.8
+git push origin v0.1.8
+```
+
+リリースは以下の URL に公開されます。
+
+```
+https://github.com/shotahirao/db-fire/releases
+```
+
+### macOS のコード署名
+
+デフォルトでは未署名のまま配布されます。そのため、macOS で開こうとするとセキュリティ警告が表示されます。
+
+署名済みアプリを配布するには、以下の GitHub Secrets を設定してください（[git-hydra](https://github.com/shotahirao/git-hydra) と同じ形式）。
+
+- `CSC_LINK` - Base64 エンコードした Developer ID Application 証明書（p12）
+- `CSC_KEY_PASSWORD` - 証明書のパスワード
+- `APPLE_ID` - Apple ID
+- `APPLE_APP_SPECIFIC_PASSWORD` - アプリ専用パスワード
+- `APPLE_TEAM_ID` - Apple Developer Team ID
+- `APPLE_SIGNING_IDENTITY` - 署名 ID（オプション）
+
+### 自動更新
+
+db-fire は起動時に更新を確認し、自動的にダウンロードします。アプリ内の設定から自動更新を OFF にすることもできます。
 
 ## ライセンス
 
