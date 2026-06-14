@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronRight, ChevronDown, Table2, Database, Search } from 'lucide-react';
 import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
+import { useWorkspaceStore } from '../../stores/workspaceStore';
 
 export const DatabaseExplorer: React.FC = () => {
   const {
@@ -116,6 +117,7 @@ export const DatabaseExplorer: React.FC = () => {
                     key={table.name}
                     onClick={() => {
                       useActiveConnectionStore.getState().selectTable(table.name);
+                      useWorkspaceStore.getState().addOrActivateTableTab(table.name);
                     }}
                     className={`flex items-center gap-1 w-full text-left px-2 py-1 rounded text-sm ${
                       selectedTable === table.name

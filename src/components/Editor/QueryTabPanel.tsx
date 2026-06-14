@@ -1,31 +1,27 @@
 import React, { useState } from 'react';
 import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
-import { useEditorStore } from '../../stores/editorStore';
+import { useWorkspaceStore, QueryResults, QueryTab } from '../../stores/workspaceStore';
 import { MonacoEditor } from './MonacoEditor';
 import { DataGrid } from '../DataGrid/DataGrid';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Plus, X, Loader2, ArrowLeft, Database, Terminal } from 'lucide-react';
+import { Play, Loader2, Database, Terminal } from 'lucide-react';
 
-interface SQLEditorPanelProps {
-  onClose?: () => void;
+interface QueryTabPanelProps {
+  tabId: string;
 }
 
-export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
+export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
   const { activeConnectionId, tables, selectedTableSchema } = useActiveConnectionStore();
   const {
     tabs,
-    activeTabId,
-    addTab,
-    closeTab,
-    setActiveTab,
-    updateTabContent,
-    setTabResults,
-    setTabExecuting,
-    setTabQueryMeta,
+    updateQueryTabContent,
+    setQueryTabResults,
+    setQueryTabExecuting,
+    setQueryTabMeta,
     addToHistory,
-  } = useEditorStore();
+  } = useWorkspaceStore();
 
-  const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
+  const activeTab = tabs.find((t): t is QueryTab => t.id === tabId && t.type === 'query');
   const [resultPaneTab, setResultPaneTab] = useState<'results' | 'query'>('results');
 
   const schemaTables = React.useMemo(() => {
@@ -53,8 +49,8 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
     const sql = activeTab.content.trim();
     if (!sql) return;
 
-    setTabExecuting(activeTab.id, true);
-    setTabResults(activeTab.id, null);
+    setQueryTabExecuting(tabId, true);
+    setQueryTabResults(tabId, null);
     setResultPaneTab('results');
     const startTime = Date.now();
 
@@ -72,7 +68,7 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
       const affectedRows = result.affected_rows;
 
       if (result.columns.length > 0) {
-        setTabResults(activeTab.id, {
+        const queryResults: QueryResults = {
           columns: result.columns,
           rows: result.rows.map((row) =>
             row.map((cell) => {
@@ -81,17 +77,17 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
               return cell as string | number | boolean;
             })
           ),
-          affectedRows: undefined,
-        });
+        };
+        setQueryTabResults(tabId, queryResults);
       } else {
-        setTabResults(activeTab.id, {
+        setQueryTabResults(tabId, {
           columns: ['Result'],
           rows: [[`Affected rows: ${affectedRows || 0}`]],
           affectedRows,
         });
       }
 
-      setTabQueryMeta(activeTab.id, {
+      setQueryTabMeta(tabId, {
         lastQuery: sql,
         lastExecutionTime: elapsed,
         lastAffectedRows: affectedRows,
@@ -99,84 +95,46 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
       addToHistory(sql);
     } catch (err) {
       const elapsed = Date.now() - startTime;
-      setTabResults(activeTab.id, {
+      setQueryTabResults(tabId, {
         columns: ['Error'],
         rows: [[String(err)]],
-        affectedRows: undefined,
       });
-      setTabQueryMeta(activeTab.id, {
+      setQueryTabMeta(tabId, {
         lastQuery: sql,
         lastExecutionTime: elapsed,
       });
     } finally {
-      setTabExecuting(activeTab.id, false);
+      setQueryTabExecuting(tabId, false);
     }
   };
 
+  if (!activeTab) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--color-text-muted)] text-sm">
+        Tab not found
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Tabs */}
-      <div className="flex items-center border-b border-[var(--color-border)] bg-[var(--color-panel-bg)]">
-        <div className="flex-1 flex overflow-x-auto">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 text-xs border-r border-[var(--color-border)] min-w-fit ${
-                activeTabId === tab.id
-                  ? 'bg-[var(--color-main-bg)] text-[var(--color-text)]'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
-              }`}
-            >
-              <span>{tab.title}</span>
-              {tabs.length > 1 && (
-                <X
-                  size={12}
-                  className="hover:text-[var(--color-danger)]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTab(tab.id);
-                  }}
-                />
-              )}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={addTab}
-          className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
-        >
-          <Plus size={14} />
-        </button>
-      </div>
-
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--color-border)] bg-[var(--color-panel-bg)]">
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-main-bg)]"
-          >
-            <ArrowLeft size={12} />
-            Back
-          </button>
-        )}
-
         <button
           onClick={handleExecute}
-          disabled={!activeConnectionId || activeTab?.isExecuting}
+          disabled={!activeConnectionId || activeTab.isExecuting}
           className={`flex items-center gap-1 px-3 py-1 rounded text-xs font-medium ${
-            activeConnectionId && !activeTab?.isExecuting
+            activeConnectionId && !activeTab.isExecuting
               ? 'bg-[var(--color-success)] text-[var(--color-main-bg)] hover:opacity-90'
               : 'bg-[var(--color-border)] text-[var(--color-text-muted)] cursor-not-allowed'
           }`}
         >
-          {activeTab?.isExecuting ? (
+          {activeTab.isExecuting ? (
             <Loader2 size={12} className="animate-spin" />
           ) : (
             <Play size={12} />
           )}
-          {activeTab?.isExecuting ? 'Running...' : 'Run (⌘+Enter)'}
+          {activeTab.isExecuting ? 'Running...' : 'Run (⌘+Enter)'}
         </button>
 
         {!activeConnectionId && (
@@ -190,15 +148,15 @@ export const SQLEditorPanel: React.FC<SQLEditorPanelProps> = ({ onClose }) => {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-[150px]">
           <MonacoEditor
-            value={activeTab?.content || ''}
-            onChange={(value) => updateTabContent(activeTab?.id || '', value)}
+            value={activeTab.content}
+            onChange={(value) => updateQueryTabContent(tabId, value)}
             onExecute={handleExecute}
             schemaTables={schemaTables}
           />
         </div>
 
         {/* Results */}
-        {activeTab?.results && (
+        {activeTab.results && (
           <div className="flex-1 min-h-[150px] border-t border-[var(--color-border)] overflow-hidden flex flex-col">
             {/* Result pane tabs */}
             <div className="flex items-center border-b border-[var(--color-border)] bg-[var(--color-panel-bg)]">

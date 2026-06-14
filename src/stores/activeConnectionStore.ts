@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
-interface TableInfo {
+export interface TableInfo {
   name: string;
   schema?: string;
   columns: ColumnInfo[];

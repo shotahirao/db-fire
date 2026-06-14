@@ -1,66 +1,223 @@
-import React, { useState } from 'react';
-import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
+import React, { useEffect, useState } from 'react';
+import { useActiveConnectionStore, TableInfo } from '../../stores/activeConnectionStore';
 import { useConnectionStore } from '../../stores/connectionStore';
 import { DataGrid } from '../DataGrid/DataGrid';
 import { ImportDialog } from '../Import/ImportDialog';
 import { exportToCSV, exportToJSON, exportToSQLInsert, DbType } from '../../lib/export';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileCode, Table2, Columns, FileJson, Download, Upload } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import {
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  FileCode,
+  Table2,
+  Columns,
+  Download,
+  Upload,
+} from 'lucide-react';
 
-interface TableBrowserProps {
-  onNewQuery?: () => void;
+interface TableTabPanelProps {
+  tableName: string;
 }
 
-export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
-  const {
-    tableData,
-    selectedTable,
-    selectedTableSchema,
-    tableFilter,
-    tableOffset,
-    tableLimit,
-    tableTotalCount,
-    tableDdl,
-    isLoading,
-    activeConnectionId,
-    setTableFilter,
-    setTableOffset,
-    setTableLimit,
-    fetchTableDdl,
-    fetchAllTableData,
-    executeUpdate,
-    importRows,
-  } = useActiveConnectionStore();
-
+export const TableTabPanel: React.FC<TableTabPanelProps> = ({ tableName }) => {
+  const { activeConnectionId, activeDatabase } = useActiveConnectionStore();
   const { connections } = useConnectionStore();
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
   const dbType: DbType = (activeConnection?.type as DbType) || 'mysql';
 
+  const [schema, setSchema] = useState<TableInfo | null>(null);
+  const [tableData, setTableData] = useState<{
+    columns: string[];
+    rows: (string | number | boolean | null)[][];
+  } | null>(null);
+  const [filter, setFilter] = useState('');
+  const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(100);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [ddl, setDdl] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'data' | 'structure' | 'ddl'>('data');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [jumpPage, setJumpPage] = useState('');
   const [exportPreset, setExportPreset] = useState('csv-current');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
-  const handleCellUpdate = async (rowIndex: number, colIndex: number, value: string | null) => {
-    if (!selectedTable || !selectedTableSchema || !tableData) return;
+  const fetchSchema = async () => {
+    if (!activeConnectionId || !activeDatabase || !tableName) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await invoke<TableInfo>('get_table_schema', {
+        id: activeConnectionId,
+        database: activeDatabase,
+        table: tableName,
+      });
+      setSchema(result);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    const column = selectedTableSchema.columns[colIndex];
+  const fetchData = async () => {
+    if (!activeConnectionId || !activeDatabase || !tableName) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      let sql = `SELECT * FROM ${tableName}`;
+      if (filter.trim()) {
+        sql += ` WHERE ${filter}`;
+      }
+      sql += ` LIMIT ${limit} OFFSET ${offset}`;
+
+      const result = await invoke<{ columns: string[]; rows: any[][] }>('execute_query', {
+        id: activeConnectionId,
+        sql,
+      });
+
+      setTableData({
+        columns: result.columns,
+        rows: result.rows.map((row) =>
+          row.map((cell) => {
+            if (cell === null || typeof cell === 'undefined') return null;
+            if (typeof cell === 'object') return JSON.stringify(cell);
+            return cell as string | number | boolean;
+          })
+        ),
+      });
+
+      try {
+        let countSql = `SELECT COUNT(*) AS cnt FROM ${tableName}`;
+        if (filter.trim()) {
+          countSql += ` WHERE ${filter}`;
+        }
+        const countResult = await invoke<{ columns: string[]; rows: any[][] }>('execute_query', {
+          id: activeConnectionId,
+          sql: countSql,
+        });
+        const total = countResult.rows[0]?.[0];
+        setTotalCount(typeof total === 'number' ? total : parseInt(String(total), 10) || 0);
+      } catch {
+        setTotalCount(null);
+      }
+    } catch (err) {
+      setError(String(err));
+      setTableData(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchDdl = async () => {
+    if (!activeConnectionId || !activeDatabase || !tableName) return;
+    if (ddl) return;
+    try {
+      const result = await invoke<string>('get_table_ddl', {
+        id: activeConnectionId,
+        database: activeDatabase,
+        table: tableName,
+      });
+      setDdl(result);
+    } catch (err) {
+      setDdl(`Error fetching DDL: ${err}`);
+    }
+  };
+
+  const executeUpdate = async (sql: string) => {
+    if (!activeConnectionId) throw new Error('No active connection');
+    const affected = await invoke<number>('execute_raw', { id: activeConnectionId, sql });
+    await fetchData();
+    return affected;
+  };
+
+  const importRows = async (sqls: string[]) => {
+    if (!activeConnectionId) throw new Error('No active connection');
+    for (const sql of sqls) {
+      await invoke<number>('execute_raw', { id: activeConnectionId, sql });
+    }
+    await fetchData();
+  };
+
+  const fetchAllData = async (options?: { ignoreFilter?: boolean }) => {
+    if (!activeConnectionId || !activeDatabase || !tableName) {
+      throw new Error('No table selected');
+    }
+
+    let sql = `SELECT * FROM ${tableName}`;
+    if (!options?.ignoreFilter && filter.trim()) {
+      sql += ` WHERE ${filter}`;
+    }
+
+    const result = await invoke<{ columns: string[]; rows: any[][] }>('execute_query', {
+      id: activeConnectionId,
+      sql,
+    });
+
+    return {
+      columns: result.columns,
+      rows: result.rows.map((row) =>
+        row.map((cell) => {
+          if (cell === null || typeof cell === 'undefined') return null;
+          if (typeof cell === 'object') return JSON.stringify(cell);
+          return cell as string | number | boolean;
+        })
+      ),
+    };
+  };
+
+  useEffect(() => {
+    setSchema(null);
+    setTableData(null);
+    setDdl(null);
+    setFilter('');
+    setOffset(0);
+    setLimit(100);
+    setTotalCount(null);
+    setActiveView('data');
+    setError(null);
+    fetchSchema();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, activeConnectionId, activeDatabase]);
+
+  useEffect(() => {
+    if (activeView === 'data') {
+      fetchData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableName, activeConnectionId, activeDatabase, filter, offset, limit, activeView]);
+
+  useEffect(() => {
+    if (activeView === 'ddl') {
+      fetchDdl();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
+
+  const handleCellUpdate = async (rowIndex: number, colIndex: number, value: string | null) => {
+    if (!tableName || !schema || !tableData) return;
+
+    const column = schema.columns[colIndex];
     if (!column) return;
 
-    const pkColumn = selectedTableSchema.columns.find((c) => c.is_primary_key);
+    const pkColumn = schema.columns.find((c) => c.is_primary_key);
     if (!pkColumn) {
       alert('Cannot edit: table has no primary key');
       return;
     }
 
-    const pkValue = tableData.rows[rowIndex][selectedTableSchema.columns.indexOf(pkColumn)];
+    const pkValue = tableData.rows[rowIndex][schema.columns.indexOf(pkColumn)];
     if (pkValue === null) return;
 
     let newValue = value;
     if (value === 'NULL') newValue = null;
 
-    const sql = `UPDATE ${selectedTable} SET ${column.name} = ${newValue === null ? 'NULL' : `'${newValue}'`} WHERE ${pkColumn.name} = '${pkValue}'`;
+    const sql = `UPDATE ${tableName} SET ${column.name} = ${newValue === null ? 'NULL' : `'${newValue}'`} WHERE ${pkColumn.name} = '${pkValue}'`;
     try {
       await executeUpdate(sql);
     } catch (err) {
@@ -68,26 +225,8 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
     }
   };
 
-  const totalPages = tableTotalCount ? Math.ceil(tableTotalCount / tableLimit) : 1;
-  const currentPage = Math.floor(tableOffset / tableLimit) + 1;
-  const startRow = tableTotalCount ? Math.min(tableOffset + 1, tableTotalCount) : 0;
-  const endRow = tableTotalCount ? Math.min(tableOffset + (tableData?.rows.length || 0), tableTotalCount) : 0;
-
-  const canGoPrev = tableOffset > 0;
-  const canGoNext = tableTotalCount !== null && tableOffset + tableLimit < tableTotalCount;
-
-  const handleJump = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      const page = parseInt(jumpPage, 10);
-      if (!isNaN(page) && page >= 1 && page <= totalPages) {
-        setTableOffset((page - 1) * tableLimit);
-      }
-      setJumpPage('');
-    }
-  };
-
   const handleExport = async () => {
-    if (!selectedTable || !tableData) return;
+    if (!tableName || !tableData) return;
 
     const [format, scope] = exportPreset.split('-') as ['csv' | 'json' | 'sql', 'current' | 'all' | 'filtered'];
 
@@ -98,7 +237,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
       columns = tableData.columns;
       rows = tableData.rows;
     } else {
-      const data = await fetchAllTableData({ ignoreFilter: scope === 'all' });
+      const data = await fetchAllData({ ignoreFilter: scope === 'all' });
       columns = data.columns;
       rows = data.rows;
     }
@@ -115,7 +254,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
         extension = 'json';
         break;
       case 'sql':
-        content = exportToSQLInsert(selectedTable, columns, rows, dbType);
+        content = exportToSQLInsert(tableName, columns, rows, dbType);
         extension = 'sql';
         break;
     }
@@ -126,6 +265,50 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
     });
     if (path) await writeTextFile(path, content);
   };
+
+  const handleFilterChange = (value: string) => {
+    setFilter(value);
+    setOffset(0);
+  };
+
+  const handleLimitChange = (value: number) => {
+    setLimit(value);
+    setOffset(0);
+  };
+
+  const totalPages = totalCount ? Math.ceil(totalCount / limit) : 1;
+  const currentPage = Math.floor(offset / limit) + 1;
+  const startRow = totalCount ? Math.min(offset + 1, totalCount) : 0;
+  const endRow = totalCount ? Math.min(offset + (tableData?.rows.length || 0), totalCount) : 0;
+
+  const canGoPrev = offset > 0;
+  const canGoNext = totalCount !== null && offset + limit < totalCount;
+
+  const handleJump = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      const page = parseInt(jumpPage, 10);
+      if (!isNaN(page) && page >= 1 && page <= totalPages) {
+        setOffset((page - 1) * limit);
+      }
+      setJumpPage('');
+    }
+  };
+
+  if (!activeConnectionId || !activeDatabase) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--color-text-muted)] text-sm">
+        Connect to a database to view tables
+      </div>
+    );
+  }
+
+  if (error && !tableData && !schema) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--color-danger)] text-sm p-4">
+        {error}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -155,7 +338,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
             Structure
           </button>
           <button
-            onClick={() => { setActiveView('ddl'); fetchTableDdl(); }}
+            onClick={() => setActiveView('ddl')}
             className={`flex items-center gap-1 px-3 py-1 rounded text-xs font-medium ${
               activeView === 'ddl'
                 ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
@@ -167,14 +350,14 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
           </button>
         </div>
 
-        {activeView === 'data' && selectedTable && (
+        {activeView === 'data' && (
           <>
             <div className="flex items-center gap-1 ml-auto">
               <Search size={12} className="text-[var(--color-text-muted)]" />
               <input
                 type="text"
-                value={tableFilter}
-                onChange={(e) => setTableFilter(e.target.value)}
+                value={filter}
+                onChange={(e) => handleFilterChange(e.target.value)}
                 placeholder="WHERE clause (e.g. id > 10)"
                 className="px-2 py-1 bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded text-xs focus:outline-none focus:border-[var(--color-accent)] w-48"
               />
@@ -215,16 +398,6 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
             </div>
           </>
         )}
-
-        {onNewQuery && (
-          <button
-            onClick={onNewQuery}
-            className="flex items-center gap-1 px-3 py-1 rounded text-xs font-medium bg-[var(--color-accent)]/20 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/30 ml-2"
-          >
-            <FileJson size={12} />
-            New Query
-          </button>
-        )}
       </div>
 
       {/* Content */}
@@ -236,7 +409,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
             editable={true}
             onCellUpdate={handleCellUpdate}
           />
-        ) : activeView === 'structure' && selectedTableSchema ? (
+        ) : activeView === 'structure' && schema ? (
           <div className="p-4 overflow-auto h-full">
             <table className="w-full text-sm border-collapse">
               <thead>
@@ -249,7 +422,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
                 </tr>
               </thead>
               <tbody>
-                {selectedTableSchema.columns.map((col) => (
+                {schema.columns.map((col) => (
                   <tr key={col.name} className="border-b border-[var(--color-border)] hover:bg-[var(--color-panel-bg)]/50">
                     <td className="px-3 py-2 font-medium">{col.name}</td>
                     <td className="px-3 py-2 text-[var(--color-accent)]">{col.data_type}</td>
@@ -261,27 +434,27 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
               </tbody>
             </table>
           </div>
-        ) : activeView === 'ddl' && tableDdl ? (
+        ) : activeView === 'ddl' && ddl ? (
           <div className="p-4 overflow-auto h-full">
             <pre className="text-sm font-mono text-[var(--color-text)] whitespace-pre-wrap">
-              {tableDdl}
+              {ddl}
             </pre>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full text-[var(--color-text-muted)]">
-            {isLoading ? 'Loading...' : 'Select a table to view'}
+            {isLoading ? 'Loading...' : 'No data'}
           </div>
         )}
       </div>
 
       {/* Footer / Pagination */}
-      {activeView === 'data' && selectedTable && tableTotalCount !== null && (
+      {activeView === 'data' && totalCount !== null && (
         <div className="flex items-center justify-between px-3 py-2 border-t border-[var(--color-border)] bg-[var(--color-panel-bg)] text-xs">
           <div className="flex items-center gap-2">
             <span className="text-[var(--color-text-muted)]">Rows per page:</span>
             <select
-              value={tableLimit}
-              onChange={(e) => setTableLimit(Number(e.target.value))}
+              value={limit}
+              onChange={(e) => handleLimitChange(Number(e.target.value))}
               className="bg-[var(--color-main-bg)] border border-[var(--color-border)] rounded px-1 py-0.5 text-xs focus:outline-none focus:border-[var(--color-accent)]"
             >
               <option value={50}>50</option>
@@ -293,8 +466,8 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
           </div>
 
           <div className="text-[var(--color-text-muted)]">
-            {tableTotalCount > 0 ? (
-              <span>Showing {startRow} - {endRow} of {tableTotalCount} rows</span>
+            {totalCount > 0 ? (
+              <span>Showing {startRow} - {endRow} of {totalCount} rows</span>
             ) : (
               <span>No rows</span>
             )}
@@ -302,7 +475,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
 
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setTableOffset(0)}
+              onClick={() => setOffset(0)}
               disabled={!canGoPrev}
               className="p-1 rounded hover:bg-[var(--color-main-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
               title="First page"
@@ -310,7 +483,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
               <ChevronsLeft size={14} />
             </button>
             <button
-              onClick={() => setTableOffset(Math.max(0, tableOffset - tableLimit))}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
               disabled={!canGoPrev}
               className="p-1 rounded hover:bg-[var(--color-main-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
               title="Previous page"
@@ -324,9 +497,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
 
             <button
               onClick={() =>
-                setTableOffset(
-                  canGoNext ? tableOffset + tableLimit : tableOffset
-                )
+                setOffset(canGoNext ? offset + limit : offset)
               }
               disabled={!canGoNext}
               className="p-1 rounded hover:bg-[var(--color-main-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
@@ -335,9 +506,7 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
               <ChevronRight size={14} />
             </button>
             <button
-              onClick={() =>
-                setTableOffset((totalPages - 1) * tableLimit)
-              }
+              onClick={() => setOffset((totalPages - 1) * limit)}
               disabled={!canGoNext}
               className="p-1 rounded hover:bg-[var(--color-main-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
               title="Last page"
@@ -360,13 +529,13 @@ export const TableBrowser: React.FC<TableBrowserProps> = ({ onNewQuery }) => {
         </div>
       )}
 
-      {selectedTable && selectedTableSchema && (
+      {schema && (
         <ImportDialog
           open={importDialogOpen}
           onOpenChange={setImportDialogOpen}
-          tableName={selectedTable}
+          tableName={tableName}
           dbType={dbType}
-          tableColumns={selectedTableSchema.columns}
+          tableColumns={schema.columns}
           onImport={importRows}
         />
       )}
