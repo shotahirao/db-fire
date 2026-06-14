@@ -33,21 +33,56 @@ pub async fn list_databases(pool: &PgPool) -> Result<Vec<String>, String> {
 
 pub async fn list_tables(pool: &PgPool, database: &str) -> Result<Vec<TableInfo>, String> {
     let rows: Vec<PgRow> = sqlx::query(
-        "SELECT table_name FROM information_schema.tables WHERE table_catalog = $1 AND table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name"
+        "SELECT \
+            t.table_name, \
+            c.column_name, \
+            c.data_type, \
+            c.is_nullable, \
+            c.column_default, \
+            (SELECT COUNT(*) > 0 FROM information_schema.table_constraints tc \
+             JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name \
+             WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = c.table_name AND ccu.column_name = c.column_name \
+               AND tc.table_schema = c.table_schema AND ccu.table_schema = c.table_schema) AS is_primary \
+        FROM information_schema.tables t \
+        LEFT JOIN information_schema.columns c \
+          ON t.table_name = c.table_name AND t.table_schema = c.table_schema \
+        WHERE t.table_catalog = $1 AND t.table_schema = 'public' AND t.table_type = 'BASE TABLE' \
+        ORDER BY t.table_name, c.ordinal_position"
     )
     .bind(database)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut tables = Vec::new();
+    let mut tables: Vec<TableInfo> = Vec::new();
     for row in rows {
-        let name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
-        tables.push(TableInfo {
-            name,
-            schema: Some("public".to_string()),
-            columns: vec![],
-        });
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: Option<String> = row.try_get("column_name").ok();
+
+        if tables.last().map(|t| t.name != table_name).unwrap_or(true) {
+            tables.push(TableInfo {
+                name: table_name.clone(),
+                schema: Some("public".to_string()),
+                columns: vec![],
+            });
+        }
+
+        if let Some(col_name) = column_name {
+            let data_type: String = row.try_get("data_type").map_err(|e| e.to_string())?;
+            let is_nullable: String = row.try_get("is_nullable").map_err(|e| e.to_string())?;
+            let default_value: Option<String> = row.try_get("column_default").ok();
+            let is_primary: bool = row.try_get("is_primary").map_err(|e| e.to_string())?;
+
+            if let Some(table) = tables.last_mut() {
+                table.columns.push(ColumnInfo {
+                    name: col_name,
+                    data_type,
+                    nullable: is_nullable == "YES",
+                    default_value,
+                    is_primary_key: is_primary,
+                });
+            }
+        }
     }
     Ok(tables)
 }

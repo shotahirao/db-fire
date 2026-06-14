@@ -23,20 +23,51 @@ pub async fn list_databases(_pool: &SqlitePool) -> Result<Vec<String>, String> {
 
 pub async fn list_tables(pool: &SqlitePool, _database: &str) -> Result<Vec<TableInfo>, String> {
     let rows: Vec<SqliteRow> = sqlx::query(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        "SELECT \
+            m.name AS table_name, \
+            p.name AS column_name, \
+            p.type AS data_type, \
+            p.notnull AS notnull, \
+            p.dflt_value AS default_value, \
+            p.pk AS pk \
+        FROM sqlite_master m \
+        LEFT JOIN pragma_table_info(m.name) p \
+        WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' \
+        ORDER BY m.name, p.cid"
     )
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut tables = Vec::new();
+    let mut tables: Vec<TableInfo> = Vec::new();
     for row in rows {
-        let name: String = row.try_get("name").map_err(|e| e.to_string())?;
-        tables.push(TableInfo {
-            name,
-            schema: Some("main".to_string()),
-            columns: vec![],
-        });
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: Option<String> = row.try_get("column_name").ok();
+
+        if tables.last().map(|t| t.name != table_name).unwrap_or(true) {
+            tables.push(TableInfo {
+                name: table_name.clone(),
+                schema: Some("main".to_string()),
+                columns: vec![],
+            });
+        }
+
+        if let Some(col_name) = column_name {
+            let data_type: String = row.try_get("data_type").unwrap_or_default();
+            let notnull: i32 = row.try_get("notnull").unwrap_or(0);
+            let default_value: Option<String> = row.try_get("default_value").ok();
+            let pk: i32 = row.try_get("pk").unwrap_or(0);
+
+            if let Some(table) = tables.last_mut() {
+                table.columns.push(ColumnInfo {
+                    name: col_name,
+                    data_type,
+                    nullable: notnull == 0,
+                    default_value,
+                    is_primary_key: pk > 0,
+                });
+            }
+        }
     }
     Ok(tables)
 }

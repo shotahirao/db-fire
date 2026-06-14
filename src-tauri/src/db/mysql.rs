@@ -38,21 +38,53 @@ pub async fn list_databases(pool: &MySqlPool) -> Result<Vec<String>, String> {
 
 pub async fn list_tables(pool: &MySqlPool, database: &str) -> Result<Vec<TableInfo>, String> {
     let rows: Vec<MySqlRow> = sqlx::query(
-        "SELECT CAST(TABLE_NAME AS CHAR) AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'"
+        "SELECT \
+            CAST(t.TABLE_NAME AS CHAR) AS table_name, \
+            CAST(c.COLUMN_NAME AS CHAR) AS column_name, \
+            CAST(c.DATA_TYPE AS CHAR) AS data_type, \
+            CAST(c.IS_NULLABLE AS CHAR) AS is_nullable, \
+            CAST(c.COLUMN_DEFAULT AS CHAR) AS default_value, \
+            CAST(c.COLUMN_KEY AS CHAR) AS column_key \
+        FROM information_schema.TABLES t \
+        LEFT JOIN information_schema.COLUMNS c \
+          ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME \
+        WHERE t.TABLE_SCHEMA = ? AND t.TABLE_TYPE = 'BASE TABLE' \
+        ORDER BY t.TABLE_NAME, c.ORDINAL_POSITION"
     )
     .bind(database)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut tables = Vec::new();
+    let mut tables: Vec<TableInfo> = Vec::new();
     for row in rows {
-        let name: String = row.try_get("name").map_err(|e| e.to_string())?;
-        tables.push(TableInfo {
-            name,
-            schema: Some(database.to_string()),
-            columns: vec![],
-        });
+        let table_name: String = row.try_get("table_name").map_err(|e| e.to_string())?;
+        let column_name: Option<String> = row.try_get("column_name").ok();
+
+        if tables.last().map(|t| t.name != table_name).unwrap_or(true) {
+            tables.push(TableInfo {
+                name: table_name.clone(),
+                schema: Some(database.to_string()),
+                columns: vec![],
+            });
+        }
+
+        if let Some(col_name) = column_name {
+            let data_type: String = row.try_get("data_type").map_err(|e| e.to_string())?;
+            let is_nullable: String = row.try_get("is_nullable").map_err(|e| e.to_string())?;
+            let default_value: Option<String> = row.try_get("default_value").ok();
+            let column_key: String = row.try_get("column_key").map_err(|e| e.to_string())?;
+
+            if let Some(table) = tables.last_mut() {
+                table.columns.push(ColumnInfo {
+                    name: col_name,
+                    data_type,
+                    nullable: is_nullable == "YES",
+                    default_value,
+                    is_primary_key: column_key == "PRI",
+                });
+            }
+        }
     }
     Ok(tables)
 }

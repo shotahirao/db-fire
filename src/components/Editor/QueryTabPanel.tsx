@@ -1,17 +1,33 @@
 import React, { useState } from 'react';
+import { format } from 'sql-formatter';
 import { useActiveConnectionStore } from '../../stores/activeConnectionStore';
+import { useConnectionStore } from '../../stores/connectionStore';
 import { useWorkspaceStore, QueryResults, QueryTab } from '../../stores/workspaceStore';
 import { MonacoEditor } from './MonacoEditor';
 import { DataGrid } from '../DataGrid/DataGrid';
 import { invoke } from '@tauri-apps/api/core';
-import { Play, Loader2, Database, Terminal } from 'lucide-react';
+import { Play, Loader2, Database, Terminal, AlignLeft } from 'lucide-react';
 
 interface QueryTabPanelProps {
   tabId: string;
 }
 
+const getFormatterLanguage = (type?: string) => {
+  switch (type) {
+    case 'mysql':
+      return 'mysql';
+    case 'postgres':
+      return 'postgresql';
+    case 'sqlite':
+      return 'sqlite';
+    default:
+      return 'sql';
+  }
+};
+
 export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
   const { activeConnectionId, tables, selectedTableSchema } = useActiveConnectionStore();
+  const { connections } = useConnectionStore();
   const {
     tabs,
     updateQueryTabContent,
@@ -24,15 +40,16 @@ export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
   const activeTab = tabs.find((t): t is QueryTab => t.id === tabId && t.type === 'query');
   const [resultPaneTab, setResultPaneTab] = useState<'results' | 'query'>('results');
 
+  const activeConnection = connections.find((c) => c.id === activeConnectionId);
+  const dbType = activeConnection?.type;
+
   const schemaTables = React.useMemo(() => {
     const schema: { name: string; columns: string[] }[] = [];
     tables.forEach((t) => {
-      if (t.columns && t.columns.length > 0) {
-        schema.push({
-          name: t.name,
-          columns: t.columns.map((c) => c.name),
-        });
-      }
+      schema.push({
+        name: t.name,
+        columns: t.columns.map((c) => c.name),
+      });
     });
     if (selectedTableSchema && !schema.find((s) => s.name === selectedTableSchema.name)) {
       schema.push({
@@ -108,6 +125,23 @@ export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
     }
   };
 
+  const handleFormat = () => {
+    if (!activeTab || !activeTab.content.trim()) return;
+    try {
+      const formatted = format(activeTab.content, {
+        language: getFormatterLanguage(dbType),
+        keywordCase: 'upper',
+        indentStyle: 'standard',
+        tabWidth: 2,
+        linesBetweenQueries: 2,
+      });
+      updateQueryTabContent(tabId, formatted.trimEnd());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('SQL format error:', err);
+    }
+  };
+
   if (!activeTab) {
     return (
       <div className="flex items-center justify-center h-full text-[var(--color-text-muted)] text-sm">
@@ -137,6 +171,20 @@ export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
           {activeTab.isExecuting ? 'Running...' : 'Run (⌘+Enter)'}
         </button>
 
+        <button
+          onClick={handleFormat}
+          disabled={!activeTab.content.trim()}
+          title="Format SQL (Shift+Alt+F)"
+          className={`flex items-center gap-1 px-3 py-1 rounded text-xs font-medium ${
+            activeTab.content.trim()
+              ? 'bg-[var(--color-accent)] text-[var(--color-main-bg)] hover:opacity-90'
+              : 'bg-[var(--color-border)] text-[var(--color-text-muted)] cursor-not-allowed'
+          }`}
+        >
+          <AlignLeft size={12} />
+          Format
+        </button>
+
         {!activeConnectionId && (
           <span className="text-xs text-[var(--color-danger)]">
             Connect to a database to execute queries
@@ -151,6 +199,7 @@ export const QueryTabPanel: React.FC<QueryTabPanelProps> = ({ tabId }) => {
             value={activeTab.content}
             onChange={(value) => updateQueryTabContent(tabId, value)}
             onExecute={handleExecute}
+            onFormat={handleFormat}
             schemaTables={schemaTables}
           />
         </div>
