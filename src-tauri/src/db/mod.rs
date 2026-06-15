@@ -2,17 +2,21 @@ use sqlx::Pool;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
+use crate::db::duckdb::Connection as DuckDbConnection;
+use crate::db::duckdb as duckdb_db;
 use crate::models::ConnectionConfig;
 use crate::ssh::SshTunnel;
 
 pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
+pub mod duckdb;
 
 pub enum DbPool {
     MySql(Pool<sqlx::MySql>),
     Postgres(Pool<sqlx::Postgres>),
     Sqlite(Pool<sqlx::Sqlite>),
+    DuckDb(std::sync::Arc<std::sync::Mutex<DuckDbConnection>>),
 }
 
 pub struct ConnectionManager {
@@ -62,40 +66,33 @@ impl ConnectionManager {
     pub async fn test_connection(&self, config: &ConnectionConfig) -> Result<(), String> {
         let (effective_config, _tunnel) = self.build_effective_config(config).await?;
 
-        let pool = match config.conn_type.as_str() {
+        match config.conn_type.as_str() {
             "mysql" => {
                 let pool = mysql::connect(&effective_config).await?;
-                DbPool::MySql(pool)
+                sqlx::query("SELECT 1").fetch_one(&pool).await.map_err(|e| e.to_string())?;
+                pool.close().await;
             }
             "postgres" => {
                 let pool = postgres::connect(&effective_config).await?;
-                DbPool::Postgres(pool)
+                sqlx::query("SELECT 1").fetch_one(&pool).await.map_err(|e| e.to_string())?;
+                pool.close().await;
             }
             "sqlite" => {
                 let pool = sqlite::connect(&effective_config).await?;
-                DbPool::Sqlite(pool)
+                sqlx::query("SELECT 1").fetch_one(&pool).await.map_err(|e| e.to_string())?;
+                pool.close().await;
+            }
+            "duckdb" => {
+                let path = effective_config.file_path.clone().unwrap_or_else(|| ":memory:".to_string());
+                tokio::task::spawn_blocking(move || {
+                    let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+                    conn.execute("SELECT 1", []).map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                })
+                .await
+                .map_err(|e| e.to_string())??;
             }
             _ => return Err(format!("Unsupported database type: {}", config.conn_type)),
-        };
-
-        // Test the connection with a simple query
-        match &pool {
-            DbPool::MySql(p) => {
-                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
-            }
-            DbPool::Postgres(p) => {
-                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
-            }
-            DbPool::Sqlite(p) => {
-                sqlx::query("SELECT 1").fetch_one(p).await.map_err(|e| e.to_string())?;
-            }
-        }
-
-        // Close the pool immediately after test
-        match pool {
-            DbPool::MySql(p) => p.close().await,
-            DbPool::Postgres(p) => p.close().await,
-            DbPool::Sqlite(p) => p.close().await,
         }
 
         Ok(())
@@ -127,6 +124,14 @@ impl ConnectionManager {
                 let pool = sqlite::connect(&effective_config).await?;
                 DbPool::Sqlite(pool)
             }
+            "duckdb" => {
+                let path = effective_config.file_path.clone().unwrap_or_else(|| ":memory:".to_string());
+                let conn = tokio::task::spawn_blocking(move || duckdb::Connection::open(&path))
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                DbPool::DuckDb(std::sync::Arc::new(std::sync::Mutex::new(conn)))
+            }
             _ => return Err(format!("Unsupported database type: {}", config.conn_type)),
         };
 
@@ -148,6 +153,7 @@ impl ConnectionManager {
             Some(DbPool::MySql(p)) => Ok(DbPool::MySql(p.clone())),
             Some(DbPool::Postgres(p)) => Ok(DbPool::Postgres(p.clone())),
             Some(DbPool::Sqlite(p)) => Ok(DbPool::Sqlite(p.clone())),
+            Some(DbPool::DuckDb(c)) => Ok(DbPool::DuckDb(c.clone())),
             None => Err("Connection not found".to_string()),
         }
     }
@@ -158,6 +164,11 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::list_databases(&p).await,
             DbPool::Postgres(p) => postgres::list_databases(&p).await,
             DbPool::Sqlite(p) => sqlite::list_databases(&p).await,
+            DbPool::DuckDb(c) => {
+                tokio::task::spawn_blocking(move || duckdb_db::list_databases(&c.lock().unwrap()))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 
@@ -167,6 +178,12 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::list_tables(&p, database).await,
             DbPool::Postgres(p) => postgres::list_tables(&p, database).await,
             DbPool::Sqlite(p) => sqlite::list_tables(&p, database).await,
+            DbPool::DuckDb(c) => {
+                let database = database.to_string();
+                tokio::task::spawn_blocking(move || duckdb_db::list_tables(&c.lock().unwrap(), &database))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 
@@ -181,6 +198,13 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::get_table_schema(&p, database, table).await,
             DbPool::Postgres(p) => postgres::get_table_schema(&p, database, table).await,
             DbPool::Sqlite(p) => sqlite::get_table_schema(&p, database, table).await,
+            DbPool::DuckDb(c) => {
+                let database = database.to_string();
+                let table = table.to_string();
+                tokio::task::spawn_blocking(move || duckdb_db::get_table_schema(&c.lock().unwrap(), &database, &table))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 
@@ -194,6 +218,12 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::execute_query(&p, sql).await,
             DbPool::Postgres(p) => postgres::execute_query(&p, sql).await,
             DbPool::Sqlite(p) => sqlite::execute_query(&p, sql).await,
+            DbPool::DuckDb(c) => {
+                let sql = sql.to_string();
+                tokio::task::spawn_blocking(move || duckdb_db::execute_query(&c.lock().unwrap(), &sql))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 
@@ -207,6 +237,12 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::execute_raw(&p, sql).await,
             DbPool::Postgres(p) => postgres::execute_raw(&p, sql).await,
             DbPool::Sqlite(p) => sqlite::execute_raw(&p, sql).await,
+            DbPool::DuckDb(c) => {
+                let sql = sql.to_string();
+                tokio::task::spawn_blocking(move || duckdb_db::execute_raw(&c.lock().unwrap(), &sql))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 
@@ -221,6 +257,13 @@ impl ConnectionManager {
             DbPool::MySql(p) => mysql::get_table_ddl(&p, database, table).await,
             DbPool::Postgres(p) => postgres::get_table_ddl(&p, database, table).await,
             DbPool::Sqlite(p) => sqlite::get_table_ddl(&p, database, table).await,
+            DbPool::DuckDb(c) => {
+                let database = database.to_string();
+                let table = table.to_string();
+                tokio::task::spawn_blocking(move || duckdb_db::get_table_ddl(&c.lock().unwrap(), &database, &table))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
         }
     }
 }

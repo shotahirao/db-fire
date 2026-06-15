@@ -55,7 +55,7 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
     onOpenChange(false);
   };
 
-  const isSqlite = form.type === 'sqlite';
+  const isFileBased = form.type === 'sqlite' || form.type === 'duckdb';
 
   const handleTest = async () => {
     setTestStatus('testing');
@@ -113,7 +113,7 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
               <select
                 value={form.type}
                 onChange={(e) => {
-                  const type = e.target.value as 'mysql' | 'postgres' | 'sqlite';
+                  const type = e.target.value as 'mysql' | 'postgres' | 'sqlite' | 'duckdb';
                   let port: number | undefined = undefined;
                   if (type === 'mysql') port = 3306;
                   if (type === 'postgres') port = 5432;
@@ -124,10 +124,11 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
                 <option value="mysql">MySQL</option>
                 <option value="postgres">PostgreSQL</option>
                 <option value="sqlite">SQLite</option>
+                <option value="duckdb">DuckDB</option>
               </select>
             </div>
 
-            {!isSqlite ? (
+            {!isFileBased ? (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -193,7 +194,7 @@ export const ConnectionDialog: React.FC<ConnectionDialogProps> = ({ open, onOpen
               </div>
             )}
 
-            {!isSqlite && (
+            {!isFileBased && (
               <div className="space-y-3 pt-2 border-t border-[var(--color-border)]">
                 <div className="flex items-center gap-2">
                   <input

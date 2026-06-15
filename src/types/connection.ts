@@ -1,7 +1,7 @@
 export interface ConnectionConfig {
   id: string;
   name: string;
-  type: 'mysql' | 'postgres' | 'sqlite';
+  type: 'mysql' | 'postgres' | 'sqlite' | 'duckdb';
   host?: string;
   port?: number;
   username?: string;

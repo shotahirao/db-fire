@@ -23,7 +23,7 @@
 
 ## Features
 
-- **Multi-database support**: MySQL, PostgreSQL, and SQLite
+- **Multi-database support**: MySQL, PostgreSQL, SQLite, and DuckDB
 - **Secure SSH tunnel connections** for remote database access
 - **Connection management**: create, edit, delete, and test connections
 - **Powerful SQL editor** powered by Monaco Editor
@@ -42,7 +42,7 @@
 | State Management | Zustand |
 | Editor | Monaco Editor |
 | Backend | Rust, Tauri 2 |
-| Database | sqlx (MySQL, PostgreSQL, SQLite) |
+| Database | sqlx (MySQL, PostgreSQL, SQLite), duckdb-rs (DuckDB) |
 | SSH | async-ssh2-lite |
 
 ## Getting Started
@@ -169,7 +169,7 @@ Alternatively, you can also open the app by:
 
 ## 機能
 
-- **複数データベース対応**: MySQL、PostgreSQL、SQLite
+- **複数データベース対応**: MySQL、PostgreSQL、SQLite、DuckDB
 - **SSH トンネル接続**による安全なリモート DB アクセス
 - **接続管理**: 作成・編集・削除・接続テスト
 - **Monaco Editor を搭載した SQL エディタ**
@@ -188,7 +188,7 @@ Alternatively, you can also open the app by:
 | 状態管理 | Zustand |
 | エディタ | Monaco Editor |
 | バックエンド | Rust、Tauri 2 |
-| データベース | sqlx（MySQL、PostgreSQL、SQLite） |
+| データベース | sqlx（MySQL、PostgreSQL、SQLite）、duckdb-rs（DuckDB） |
 | SSH | async-ssh2-lite |
 
 ## はじめかた

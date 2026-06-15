@@ -33,6 +33,10 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 futures-util = "0.3"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-native-tls", "mysql", "postgres", "sqlite", "chrono"] }
+duckdb = { version = "1.2", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-ssh2-lite = { version = "0.5", features = ["tokio"] }
+
+[dev-dependencies]
+tempfile = "3"
 
