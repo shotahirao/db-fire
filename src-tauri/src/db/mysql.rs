@@ -1,3 +1,4 @@
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlSslMode};
 use sqlx::{mysql::MySqlRow, Column, MySqlPool, Row, TypeInfo};
 
 use crate::db::{ColumnInfo, QueryResult, TableInfo};
@@ -10,12 +11,34 @@ pub async fn connect(config: &ConnectionConfig) -> Result<MySqlPool, String> {
     let password = config.password.as_deref().unwrap_or("");
     let database = config.database.as_deref().unwrap_or("");
 
-    let url = format!(
-        "mysql://{}:{}@{}:{}/{}?charset=utf8mb4",
-        user, password, host, port, database
-    );
+    // URL文字列を組み立てず ConnectOptions を使うことで、資格情報の
+    // percent-encoding 問題（`@` `:` `/` 等）を構造的に回避する。
+    let mut opts = MySqlConnectOptions::new()
+        .host(host)
+        .port(port)
+        .username(user)
+        .password(password)
+        .charset("utf8mb4");
 
-    MySqlPool::connect(&url)
+    if !database.is_empty() {
+        opts = opts.database(database);
+    }
+
+    // config.ssl_mode を尊重する（従来 MySQL では無視されていた）
+    let ssl_mode = match config.ssl_mode.as_deref() {
+        Some("disable") | Some("disabled") => Some(MySqlSslMode::Disabled),
+        Some("prefer") | Some("preferred") => Some(MySqlSslMode::Preferred),
+        Some("require") | Some("required") => Some(MySqlSslMode::Required),
+        Some("verify-ca") => Some(MySqlSslMode::VerifyCa),
+        Some("verify-full") | Some("verify-identity") => Some(MySqlSslMode::VerifyIdentity),
+        _ => None,
+    };
+    if let Some(mode) = ssl_mode {
+        opts = opts.ssl_mode(mode);
+    }
+
+    MySqlPoolOptions::new()
+        .connect_with(opts)
         .await
         .map_err(|e| format!("MySQL connection failed: {}", e))
 }
@@ -124,8 +147,7 @@ pub async fn get_table_schema(pool: &MySqlPool, database: &str, table: &str) -> 
 }
 
 pub async fn execute_query(pool: &MySqlPool, sql: &str) -> Result<QueryResult, String> {
-    let trimmed = sql.trim().to_uppercase();
-    if trimmed.starts_with("SELECT") || trimmed.starts_with("SHOW") || trimmed.starts_with("DESCRIBE") {
+    if crate::db::returns_rows(sql) {
         let rows = sqlx::query(sql)
             .fetch_all(pool)
             .await
@@ -173,9 +195,11 @@ pub async fn execute_raw(pool: &MySqlPool, sql: &str) -> Result<u64, String> {
     Ok(result.rows_affected())
 }
 
-pub async fn get_table_ddl(pool: &MySqlPool, _database: &str, table: &str) -> Result<String, String> {
-    let row: MySqlRow = sqlx::query("SHOW CREATE TABLE ??")
-        .bind(table)
+pub async fn get_table_ddl(pool: &MySqlPool, database: &str, table: &str) -> Result<String, String> {
+    // SHOW CREATE TABLE は識別子をバインドできないため、バッククオートでエスケープして埋め込む
+    let quote = |s: &str| format!("`{}`", s.replace('`', "``"));
+    let sql = format!("SHOW CREATE TABLE {}.{}", quote(database), quote(table));
+    let row: MySqlRow = sqlx::query(&sql)
         .fetch_one(pool)
         .await
         .map_err(|e| e.to_string())?;

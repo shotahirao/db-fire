@@ -19,6 +19,45 @@ pub enum DbPool {
     DuckDb(std::sync::Arc<std::sync::Mutex<DuckDbConnection>>),
 }
 
+/// SQL文が結果セットを返すかどうかを先頭キーワードで判定する。
+/// 先頭の空白・コメント(`--` / `/* */`)を除去してから判定するため、
+/// CTE (`WITH ... SELECT`) やコメント付きクエリも正しく分類される。
+pub fn returns_rows(sql: &str) -> bool {
+    let mut rest = sql.trim_start();
+    loop {
+        if let Some(stripped) = rest.strip_prefix("--") {
+            rest = match stripped.find('\n') {
+                Some(i) => stripped[i + 1..].trim_start(),
+                None => "",
+            };
+        } else if let Some(stripped) = rest.strip_prefix("/*") {
+            rest = match stripped.find("*/") {
+                Some(i) => stripped[i + 2..].trim_start(),
+                None => "",
+            };
+        } else {
+            break;
+        }
+    }
+    let keyword: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_uppercase();
+    matches!(
+        keyword.as_str(),
+        "SELECT" | "WITH" | "SHOW" | "EXPLAIN" | "DESCRIBE" | "DESC" | "PRAGMA" | "VALUES" | "TABLE"
+    )
+}
+
+/// DuckDB接続のロック取得。毒化していても内部値を取り出して継続する
+/// （一度のpanicで以後の全DuckDB操作が死ぬのを防ぐ）。
+fn lock_duckdb(
+    c: &std::sync::Arc<std::sync::Mutex<DuckDbConnection>>,
+) -> std::sync::MutexGuard<'_, DuckDbConnection> {
+    c.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub struct ConnectionManager {
     pools: Mutex<HashMap<String, DbPool>>,
     ssh_tunnels: Mutex<HashMap<String, SshTunnel>>,
@@ -83,9 +122,9 @@ impl ConnectionManager {
                 pool.close().await;
             }
             "duckdb" => {
-                let path = effective_config.file_path.clone().unwrap_or_else(|| ":memory:".to_string());
+                let config = effective_config.clone();
                 tokio::task::spawn_blocking(move || {
-                    let conn = duckdb::Connection::open(&path).map_err(|e| e.to_string())?;
+                    let conn = duckdb_db::connect(&config)?;
                     conn.execute("SELECT 1", []).map_err(|e| e.to_string())?;
                     Ok::<(), String>(())
                 })
@@ -125,11 +164,10 @@ impl ConnectionManager {
                 DbPool::Sqlite(pool)
             }
             "duckdb" => {
-                let path = effective_config.file_path.clone().unwrap_or_else(|| ":memory:".to_string());
-                let conn = tokio::task::spawn_blocking(move || duckdb::Connection::open(&path))
+                let config = effective_config.clone();
+                let conn = tokio::task::spawn_blocking(move || duckdb_db::connect(&config))
                     .await
-                    .map_err(|e| e.to_string())?
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())??;
                 DbPool::DuckDb(std::sync::Arc::new(std::sync::Mutex::new(conn)))
             }
             _ => return Err(format!("Unsupported database type: {}", config.conn_type)),
@@ -165,7 +203,7 @@ impl ConnectionManager {
             DbPool::Postgres(p) => postgres::list_databases(&p).await,
             DbPool::Sqlite(p) => sqlite::list_databases(&p).await,
             DbPool::DuckDb(c) => {
-                tokio::task::spawn_blocking(move || duckdb_db::list_databases(&c.lock().unwrap()))
+                tokio::task::spawn_blocking(move || duckdb_db::list_databases(&lock_duckdb(&c)))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -180,7 +218,7 @@ impl ConnectionManager {
             DbPool::Sqlite(p) => sqlite::list_tables(&p, database).await,
             DbPool::DuckDb(c) => {
                 let database = database.to_string();
-                tokio::task::spawn_blocking(move || duckdb_db::list_tables(&c.lock().unwrap(), &database))
+                tokio::task::spawn_blocking(move || duckdb_db::list_tables(&lock_duckdb(&c), &database))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -201,7 +239,7 @@ impl ConnectionManager {
             DbPool::DuckDb(c) => {
                 let database = database.to_string();
                 let table = table.to_string();
-                tokio::task::spawn_blocking(move || duckdb_db::get_table_schema(&c.lock().unwrap(), &database, &table))
+                tokio::task::spawn_blocking(move || duckdb_db::get_table_schema(&lock_duckdb(&c), &database, &table))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -220,7 +258,7 @@ impl ConnectionManager {
             DbPool::Sqlite(p) => sqlite::execute_query(&p, sql).await,
             DbPool::DuckDb(c) => {
                 let sql = sql.to_string();
-                tokio::task::spawn_blocking(move || duckdb_db::execute_query(&c.lock().unwrap(), &sql))
+                tokio::task::spawn_blocking(move || duckdb_db::execute_query(&lock_duckdb(&c), &sql))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -239,7 +277,7 @@ impl ConnectionManager {
             DbPool::Sqlite(p) => sqlite::execute_raw(&p, sql).await,
             DbPool::DuckDb(c) => {
                 let sql = sql.to_string();
-                tokio::task::spawn_blocking(move || duckdb_db::execute_raw(&c.lock().unwrap(), &sql))
+                tokio::task::spawn_blocking(move || duckdb_db::execute_raw(&lock_duckdb(&c), &sql))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -260,7 +298,7 @@ impl ConnectionManager {
             DbPool::DuckDb(c) => {
                 let database = database.to_string();
                 let table = table.to_string();
-                tokio::task::spawn_blocking(move || duckdb_db::get_table_ddl(&c.lock().unwrap(), &database, &table))
+                tokio::task::spawn_blocking(move || duckdb_db::get_table_ddl(&lock_duckdb(&c), &database, &table))
                     .await
                     .map_err(|e| e.to_string())?
             }
@@ -289,4 +327,31 @@ pub struct QueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
     pub affected_rows: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::returns_rows;
+
+    #[test]
+    fn test_returns_rows() {
+        assert!(returns_rows("SELECT * FROM t"));
+        assert!(returns_rows("select 1"));
+        assert!(returns_rows("  \n SELECT 1"));
+        assert!(returns_rows("WITH t AS (SELECT 1) SELECT * FROM t"));
+        assert!(returns_rows("-- comment\nSELECT 1"));
+        assert!(returns_rows("/* block */ SELECT 1"));
+        assert!(returns_rows("-- a\n-- b\n/* c */\nEXPLAIN SELECT 1"));
+        assert!(returns_rows("SHOW TABLES"));
+        assert!(returns_rows("PRAGMA table_info(\"t\")"));
+        assert!(returns_rows("DESCRIBE t"));
+        assert!(returns_rows("VALUES (1)"));
+
+        assert!(!returns_rows("INSERT INTO t VALUES (1)"));
+        assert!(!returns_rows("UPDATE t SET a = 1"));
+        assert!(!returns_rows("DELETE FROM t"));
+        assert!(!returns_rows("-- comment\nDROP TABLE t"));
+        assert!(!returns_rows(""));
+        assert!(!returns_rows("-- only a comment"));
+    }
 }

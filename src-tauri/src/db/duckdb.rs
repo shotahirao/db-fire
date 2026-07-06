@@ -112,14 +112,7 @@ pub fn get_table_schema(
 }
 
 pub fn execute_query(conn: &Connection, sql: &str) -> Result<QueryResult, String> {
-    let trimmed = sql.trim().to_uppercase();
-    let is_select = trimmed.starts_with("SELECT")
-        || trimmed.starts_with("SHOW")
-        || trimmed.starts_with("DESCRIBE")
-        || trimmed.starts_with("EXPLAIN")
-        || trimmed.starts_with("PRAGMA");
-
-    if is_select {
+    if crate::db::returns_rows(sql) {
         let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
         let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
         let column_names: Vec<String> = rows

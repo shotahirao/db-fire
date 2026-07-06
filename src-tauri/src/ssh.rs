@@ -12,6 +12,14 @@ pub struct SshTunnel {
     remote_host: String,
     #[allow(dead_code)]
     remote_port: u16,
+    accept_task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for SshTunnel {
+    fn drop(&mut self) {
+        // トンネル破棄時にaccept ループを止めないとタスクとローカルポートがリークする
+        self.accept_task.abort();
+    }
 }
 
 impl SshTunnel {
@@ -48,7 +56,8 @@ impl SshTunnel {
             return Err("SSH password auth not implemented, please provide a private key".to_string());
         }
 
-        // Find an available local port
+        // Find an available local port. The listener is moved into the accept
+        // task as-is; dropping and re-binding would race with other processes.
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| format!("Failed to bind local port: {}", e))?;
@@ -57,23 +66,12 @@ impl SshTunnel {
             .map_err(|e| format!("Failed to get local address: {}", e))?
             .port();
 
-        // Drop the listener, we'll use the port directly in connection strings
-        drop(listener);
-
         let session = Arc::new(Mutex::new(session));
         let session_clone = session.clone();
         let remote_host_clone = remote_host.to_string();
 
         // Spawn background task to accept tunnel connections
-        tokio::spawn(async move {
-            let listener = match TcpListener::bind(format!("127.0.0.1:{}", local_port)).await {
-                Ok(l) => l,
-                Err(e) => {
-                    eprintln!("SSH tunnel listener failed: {}", e);
-                    return;
-                }
-            };
-
+        let accept_task = tokio::spawn(async move {
             loop {
                 let (mut local_stream, _) = match listener.accept().await {
                     Ok(r) => r,
@@ -101,7 +99,11 @@ impl SshTunnel {
                     drop(session);
 
                     let mut channel_stream = channel.stream(0);
-                    let _ = tokio::io::copy_bidirectional(&mut local_stream, &mut channel_stream).await;
+                    if let Err(e) =
+                        tokio::io::copy_bidirectional(&mut local_stream, &mut channel_stream).await
+                    {
+                        eprintln!("SSH tunnel stream error: {}", e);
+                    }
                 });
             }
         });
@@ -111,6 +113,7 @@ impl SshTunnel {
             local_port,
             remote_host: remote_host.to_string(),
             remote_port,
+            accept_task,
         })
     }
 

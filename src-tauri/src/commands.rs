@@ -32,6 +32,7 @@ pub async fn delete_connection(app: AppHandle, id: String) -> Result<(), String>
     let mut connections = state.load(&app)?;
     connections.retain(|c| c.id != id);
     state.save(&app, &connections)?;
+    ConnectionsState::forget_password(&id)?;
     Ok(())
 }
 

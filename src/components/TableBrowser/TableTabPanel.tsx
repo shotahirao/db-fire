@@ -3,7 +3,15 @@ import { useActiveConnectionStore, TableInfo } from '../../stores/activeConnecti
 import { useConnectionStore } from '../../stores/connectionStore';
 import { DataGrid } from '../DataGrid/DataGrid';
 import { ImportDialog } from '../Import/ImportDialog';
-import { exportToCSV, exportToJSON, exportToSQLInsert, DbType } from '../../lib/export';
+import {
+  exportToCSV,
+  exportToJSON,
+  exportToSQLInsert,
+  quoteIdentifier,
+  escapeSqlString,
+  formatSqlValue,
+  DbType,
+} from '../../lib/export';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
@@ -217,7 +225,24 @@ export const TableTabPanel: React.FC<TableTabPanelProps> = ({ tableName }) => {
     let newValue = value;
     if (value === 'NULL') newValue = null;
 
-    const sql = `UPDATE ${tableName} SET ${column.name} = ${newValue === null ? 'NULL' : `'${newValue}'`} WHERE ${pkColumn.name} = '${pkValue}'`;
+    const formatEditedValue = (input: string): string => {
+      const type = column.data_type.toLowerCase();
+      if (/int|decimal|numeric|float|double|real|serial|number/.test(type)) {
+        const n = Number(input);
+        if (input.trim() !== '' && Number.isFinite(n)) return input.trim();
+      }
+      if (/bool/.test(type)) {
+        const lower = input.trim().toLowerCase();
+        if (lower === 'true' || lower === 'false') {
+          return formatSqlValue(lower === 'true', dbType);
+        }
+      }
+      return `'${escapeSqlString(input)}'`;
+    };
+
+    const sql = `UPDATE ${quoteIdentifier(tableName, dbType)} SET ${quoteIdentifier(column.name, dbType)} = ${
+      newValue === null ? 'NULL' : formatEditedValue(newValue)
+    } WHERE ${quoteIdentifier(pkColumn.name, dbType)} = ${formatSqlValue(pkValue, dbType)}`;
     try {
       await executeUpdate(sql);
     } catch (err) {

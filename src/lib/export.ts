@@ -1,4 +1,4 @@
-export type DbType = 'mysql' | 'postgres' | 'sqlite';
+export type DbType = 'mysql' | 'postgres' | 'sqlite' | 'duckdb';
 
 export const exportToCSV = (columns: string[], rows: (string | number | boolean | null)[][]): string => {
   const escapeCSV = (value: string | number | boolean | null): string => {
@@ -32,7 +32,7 @@ export const quoteIdentifier = (name: string, dbType: DbType): string => {
   if (dbType === 'mysql') {
     return `\`${name.replace(/`/g, '``')}\``;
   }
-  // postgres and sqlite use double quotes
+  // postgres, sqlite, duckdb use double quotes
   return `"${name.replace(/"/g, '""')}"`;
 };
 

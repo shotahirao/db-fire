@@ -73,8 +73,9 @@ pub async fn list_tables(pool: &SqlitePool, _database: &str) -> Result<Vec<Table
 }
 
 pub async fn get_table_schema(pool: &SqlitePool, _database: &str, table: &str) -> Result<TableInfo, String> {
-    let rows: Vec<SqliteRow> = sqlx::query("PRAGMA table_info( ? )")
-        .bind(table)
+    // PRAGMA は識別子をバインドできないため、ダブルクオートでエスケープして埋め込む
+    let sql = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
+    let rows: Vec<SqliteRow> = sqlx::query(&sql)
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -104,8 +105,7 @@ pub async fn get_table_schema(pool: &SqlitePool, _database: &str, table: &str) -
 }
 
 pub async fn execute_query(pool: &SqlitePool, sql: &str) -> Result<QueryResult, String> {
-    let trimmed = sql.trim().to_uppercase();
-    if trimmed.starts_with("SELECT") || trimmed.starts_with("PRAGMA") {
+    if crate::db::returns_rows(sql) {
         let rows = sqlx::query(sql)
             .fetch_all(pool)
             .await
@@ -187,4 +187,57 @@ pub async fn get_table_ddl(pool: &SqlitePool, _database: &str, table: &str) -> R
         .await
         .map_err(|e| e.to_string())?;
     Ok(ddl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, note TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO users (id, name, note) VALUES (1, 'Alice', 'hi')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_get_table_schema_pragma() {
+        let pool = setup().await;
+        // 従来 PRAGMA table_info(?) はバインドできず失敗していた
+        let schema = get_table_schema(&pool, "main", "users").await.unwrap();
+        assert_eq!(schema.name, "users");
+        assert_eq!(schema.columns.len(), 3);
+        assert!(schema.columns.iter().any(|c| c.name == "id" && c.is_primary_key));
+        assert!(schema.columns.iter().any(|c| c.name == "name" && !c.nullable));
+    }
+
+    #[tokio::test]
+    async fn test_execute_query_cte_and_comments() {
+        let pool = setup().await;
+        // CTE が結果セットを返す（従来は書き込み扱いで結果が失われていた）
+        let cte = execute_query(&pool, "WITH t AS (SELECT id, name FROM users) SELECT * FROM t")
+            .await
+            .unwrap();
+        assert_eq!(cte.rows.len(), 1);
+        assert_eq!(cte.columns, vec!["id", "name"]);
+
+        // 先頭コメント付き SELECT
+        let commented = execute_query(&pool, "-- fetch all\nSELECT * FROM users")
+            .await
+            .unwrap();
+        assert_eq!(commented.rows.len(), 1);
+
+        // 書き込みは affected_rows を返す
+        let updated = execute_query(&pool, "UPDATE users SET note = 'bye' WHERE id = 1")
+            .await
+            .unwrap();
+        assert_eq!(updated.affected_rows, Some(1));
+        assert!(updated.rows.is_empty());
+    }
 }

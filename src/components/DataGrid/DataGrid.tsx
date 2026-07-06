@@ -27,6 +27,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [sorting, setSorting] = useState<SortingState>([]);
+  // Enter/Escape で編集を終えると input が unmount され blur も発火するため、
+  // 二重コミットを防ぐフラグ
+  const editSettledRef = React.useRef(false);
 
   const tableColumns = React.useMemo(
     () =>
@@ -35,17 +38,23 @@ export const DataGrid: React.FC<DataGridProps> = ({
         header: col,
         enableSorting: true,
         cell: ({ row, getValue }: any) => {
-          const rowIndex = row.index;
+          // ソート後も元データ配列の行を指すよう、構築時に埋めたインデックスを使う
+          const originalRowIndex = row.original.__rowIndex as number;
           const isEditing =
-            editingCell?.row === rowIndex && editingCell?.col === colIndex;
+            editingCell?.row === originalRowIndex && editingCell?.col === colIndex;
           const value = getValue();
 
-          // Find original row index for updates
-          const originalRowIndex = rows.findIndex(
-            (r) => columns.every((c, i) => r[i] === row.original[c])
-          );
-
           if (isEditing && editable) {
+            const commitEdit = () => {
+              if (editSettledRef.current) return;
+              editSettledRef.current = true;
+              onCellUpdate?.(originalRowIndex, colIndex, editValue || null);
+              setEditingCell(null);
+            };
+            const cancelEdit = () => {
+              editSettledRef.current = true;
+              setEditingCell(null);
+            };
             return (
               <input
                 type="text"
@@ -53,16 +62,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    onCellUpdate?.(originalRowIndex >= 0 ? originalRowIndex : rowIndex, colIndex, editValue || null);
-                    setEditingCell(null);
+                    commitEdit();
                   } else if (e.key === 'Escape') {
-                    setEditingCell(null);
+                    cancelEdit();
                   }
                 }}
-                onBlur={() => {
-                  onCellUpdate?.(originalRowIndex >= 0 ? originalRowIndex : rowIndex, colIndex, editValue || null);
-                  setEditingCell(null);
-                }}
+                onBlur={commitEdit}
                 autoFocus
                 className="w-full px-1 py-0.5 bg-[var(--color-main-bg)] border border-[var(--color-accent)] rounded text-sm focus:outline-none"
               />
@@ -80,7 +85,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
             <span
               onDoubleClick={() => {
                 if (!editable) return;
-                setEditingCell({ row: rowIndex, col: colIndex });
+                editSettledRef.current = false;
+                setEditingCell({ row: originalRowIndex, col: colIndex });
                 setEditValue(value === null ? 'NULL' : String(value));
               }}
               className={editable ? 'cursor-pointer hover:bg-[var(--color-accent)]/10 px-1 py-0.5 rounded' : ''}
@@ -95,8 +101,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   const tableData = React.useMemo(
     () =>
-      rows.map((row) => {
-        const obj: Record<string, any> = {};
+      rows.map((row, rowIndex) => {
+        const obj: Record<string, any> = { __rowIndex: rowIndex };
         row.forEach((cell, i) => {
           obj[columns[i]] = cell;
         });

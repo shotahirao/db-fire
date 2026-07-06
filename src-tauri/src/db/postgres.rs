@@ -1,3 +1,4 @@
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use sqlx::{postgres::PgRow, Column, PgPool, Row, TypeInfo};
 
 use crate::db::{ColumnInfo, QueryResult, TableInfo};
@@ -9,14 +10,28 @@ pub async fn connect(config: &ConnectionConfig) -> Result<PgPool, String> {
     let user = config.username.as_deref().unwrap_or("postgres");
     let password = config.password.as_deref().unwrap_or("");
     let database = config.database.as_deref().unwrap_or("postgres");
-    let ssl_mode = config.ssl_mode.as_deref().unwrap_or("prefer");
 
-    let url = format!(
-        "postgres://{}:{}@{}:{}/{}?sslmode={}",
-        user, password, host, port, database, ssl_mode
-    );
+    let ssl_mode = match config.ssl_mode.as_deref() {
+        Some("disable") | Some("disabled") => PgSslMode::Disable,
+        Some("allow") => PgSslMode::Allow,
+        Some("require") | Some("required") => PgSslMode::Require,
+        Some("verify-ca") => PgSslMode::VerifyCa,
+        Some("verify-full") => PgSslMode::VerifyFull,
+        _ => PgSslMode::Prefer,
+    };
 
-    PgPool::connect(&url)
+    // URL文字列を組み立てず ConnectOptions を使い、資格情報の
+    // percent-encoding 問題を構造的に回避する。
+    let opts = PgConnectOptions::new()
+        .host(host)
+        .port(port)
+        .username(user)
+        .password(password)
+        .database(database)
+        .ssl_mode(ssl_mode);
+
+    PgPoolOptions::new()
+        .connect_with(opts)
         .await
         .map_err(|e| format!("PostgreSQL connection failed: {}", e))
 }
@@ -121,8 +136,7 @@ pub async fn get_table_schema(pool: &PgPool, _database: &str, table: &str) -> Re
 }
 
 pub async fn execute_query(pool: &PgPool, sql: &str) -> Result<QueryResult, String> {
-    let trimmed = sql.trim().to_uppercase();
-    if trimmed.starts_with("SELECT") || trimmed.starts_with("SHOW") || trimmed.starts_with("DESCRIBE") || trimmed.starts_with("EXPLAIN") {
+    if crate::db::returns_rows(sql) {
         let rows = sqlx::query(sql)
             .fetch_all(pool)
             .await
