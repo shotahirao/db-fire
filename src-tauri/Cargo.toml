@@ -1,6 +1,6 @@
 [package]
 name = "db-fire"
-version = "0.1.11"
+version = "0.1.12"
 description = "db-fire database client"
 authors = ["you"]
 edition = "2021"
