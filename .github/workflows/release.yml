@@ -63,3 +63,31 @@ jobs:
           prerelease: false
           generateReleaseNotes: true
           args: '--target aarch64-apple-darwin'
+
+      - name: Update Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$TAP_GITHUB_TOKEN" ]; then
+            echo "TAP_GITHUB_TOKEN not configured, skipping Homebrew cask update"
+            exit 0
+          fi
+          VERSION="${TAG#v}"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*_aarch64.dmg' --dir "$RUNNER_TEMP/cask"
+          SHA256=$(shasum -a 256 "$RUNNER_TEMP/cask/db-fire_${VERSION}_aarch64.dmg" | awk '{print $1}')
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/shotahirao/homebrew-tap.git" "$RUNNER_TEMP/homebrew-tap"
+          cd "$RUNNER_TEMP/homebrew-tap"
+          sed -i '' \
+            -e "s/^  version \".*\"/  version \"${VERSION}\"/" \
+            -e "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" \
+            Casks/db-fire.rb
+          if git diff --quiet; then
+            echo "Cask already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "db-fire ${VERSION}"
+          git push

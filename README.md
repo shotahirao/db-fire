@@ -117,7 +117,21 @@ To distribute a properly signed app, configure the following GitHub Secrets (sam
 
 db-fire checks for updates on startup and downloads them automatically. Users can disable this in the app's Settings.
 
-## Download Release Version
+## Installation
+
+> Note: release builds are Apple Silicon (aarch64) only.
+
+### Homebrew (recommended)
+
+```bash
+brew install --cask shotahirao/tap/db-fire
+```
+
+db-fire is not notarized by Apple, but the cask removes the quarantine
+attribute automatically after installation, so the app opens without a
+Gatekeeper warning.
+
+### Manual Download
 
 Download the latest release from GitHub Releases:
 
@@ -125,28 +139,19 @@ Download the latest release from GitHub Releases:
 https://github.com/shotahirao/db-fire/releases/latest
 ```
 
-### Troubleshooting on macOS
+#### Troubleshooting on macOS
 
-db-fire is currently not signed with an Apple Developer ID, so macOS Gatekeeper may block the app with the following message:
+db-fire is currently not signed with an Apple Developer ID, so macOS Gatekeeper blocks manually downloaded builds with the following message:
 
 > “db-fire” is damaged and can’t be opened. You should move it to the Trash.
 
 If you see this message, remove the quarantine attribute using the Terminal:
 
 ```bash
-sudo xattr -cr /Applications/db-fire.app
+xattr -rd com.apple.quarantine /Applications/db-fire.app
 ```
 
-Alternatively, you can also try:
-
-```bash
-sudo xattr -d com.apple.quarantine /Applications/db-fire.app
-```
-
-Alternatively, you can also open the app by:
-
-- Right-clicking the app and selecting **Open**
-- Going to **System Settings → Privacy & Security** and clicking **Open Anyway** for db-fire
+> Note: if you get `Permission denied`, re-run the command with `sudo`. If you get `Operation not permitted`, allow **Terminal** under **System Settings → Privacy & Security → Full Disk Access**.
 
 ## License
 
@@ -263,7 +268,19 @@ https://github.com/shotahirao/db-fire/releases
 
 db-fire は起動時に更新を確認し、自動的にダウンロードします。アプリ内の設定から自動更新を OFF にすることもできます。
 
-## リリース版のダウンロード
+## インストール
+
+> 注: リリースビルドは Apple Silicon (aarch64) 専用です。
+
+### Homebrew（推奨）
+
+```bash
+brew install --cask shotahirao/tap/db-fire
+```
+
+db-fire は Apple による notarization（公証）を行っていませんが、cask がインストール後に検疫属性を自動で除去するため、Gatekeeper の警告なしに起動できます。
+
+### 手動ダウンロード
 
 最新版は GitHub Releases からダウンロードできます。
 
@@ -271,28 +288,19 @@ db-fire は起動時に更新を確認し、自動的にダウンロードしま
 https://github.com/shotahirao/db-fire/releases/latest
 ```
 
-### macOS でアプリが開けない場合
+#### macOS でアプリが開けない場合
 
-db-fire は現在 Apple Developer ID によるコード署名を行っていないため、macOS の Gatekeeper によって以下のようなメッセージが表示されることがあります。
+db-fire は現在 Apple Developer ID によるコード署名を行っていないため、手動ダウンロードした場合は macOS の Gatekeeper によって以下のようなメッセージが表示されます。
 
 > 「db-fire」は壊れているため開けません。ゴミ箱に入れる必要があります。
 
 このメッセージが表示された場合は、ターミナルで以下のコマンドを実行し、アプリの検疫属性を解除してください。
 
 ```bash
-sudo xattr -cr /Applications/db-fire.app
+xattr -rd com.apple.quarantine /Applications/db-fire.app
 ```
 
-または、以下も試せます。
-
-```bash
-sudo xattr -d com.apple.quarantine /Applications/db-fire.app
-```
-
-または、以下の方法でも開けます。
-
-- アプリを右クリックして「開く」を選択
-- **システム設定 → プライバシーとセキュリティ** で db-fire の「**とにかく開く**」を許可
+> 注: `Permission denied` と表示される場合は先頭に `sudo` を付けて実行してください。`Operation not permitted` と表示される場合は、**システム設定 → プライバシーとセキュリティ → フルディスクアクセス** で **ターミナル** を許可してください。
 
 ## ライセンス
 
